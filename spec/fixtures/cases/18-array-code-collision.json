@@ -1,0 +1,12 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [
+    {"station_id": "c1", "labels": [{"wind_level": "HIGH"}, {"wind_level": "m"}]}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\nid|lb\nc1|[{\"l\":\"h\"},{\"l\":\"m\"}]",
+  "decoded": [
+    {"station_id": "c1", "labels": [{"wind_level": "HIGH"}, {"wind_level": "MEDIUM"}]}
+  ]
+}

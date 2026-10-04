@@ -1,0 +1,10 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [
+    {"station_id": "n1", "user": {"wind_level": "HIGH", "rain_m": 0.07}},
+    {"station_id": "n2", "user": {"wind_level": "m", "rain_m": 0.1234}}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\nid|us.l|us.v\nn1|h|700\nn2|\"m\"|1234"
+}

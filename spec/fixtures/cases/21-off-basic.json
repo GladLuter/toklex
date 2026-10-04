@@ -1,0 +1,11 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "mode": "off",
+  "rows": [
+    {"station_id": "st-1", "name": "North Ridge", "wind_level": "MEDIUM", "rain_m": 0.0743},
+    {"station_id": "st-2", "name": "Bay Point", "wind_level": "HIGH", "rain_m": 0.1201}
+  ],
+  "meta": {"date": "2026-09-30"},
+  "expected": "{\"toklex\":\"off\",\"schema\":\"tx@{v}\",\"instructions\":{\"rule\":\"Use only the fields in this reply.\"},\"meta\":{\"date\":\"2026-09-30\"},\"rows\":[{\"station_id\":\"st-1\",\"name\":\"North Ridge\",\"wind_level\":\"MEDIUM\",\"rain_m\":0.0743},{\"station_id\":\"st-2\",\"name\":\"Bay Point\",\"wind_level\":\"HIGH\",\"rain_m\":0.1201}]}"
+}

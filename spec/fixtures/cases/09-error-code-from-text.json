@@ -1,0 +1,6 @@
+{
+  "schema": "test.schema.json",
+  "error": "No station with that id.",
+  "expected": "~tx@{v} i:+ e:nf",
+  "decoded_meta": {"e": "No station with that id."}
+}

@@ -1,0 +1,8 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [],
+  "meta": {"name": "a\tb", "labels": [{"name": "x y"}, "a|b"], "login": "{\"a\":1}"},
+  "expected": "~tx@{v} i:+ n:\"a\\tb\" lb:\"[{\\\"n\\\":\\\"x y\\\"},\\\"a\\u007cb\\\"]\" lg:\"{\\\"a\\\":1}\"",
+  "decoded_meta": {"name": "a\tb", "labels": "[{\"n\":\"x y\"},\"a|b\"]", "login": "{\"a\":1}"}
+}

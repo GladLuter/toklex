@@ -1,0 +1,16 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [
+    {"station_id": "a", "name": "", "wind_level": null, "rain_m": null},
+    {"station_id": "b", "name": null, "wind_level": "LOW"},
+    {"station_id": "c", "rain_m": 0.05}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\nid|n|l|v\na|\"\"\nb||l\nc|||500",
+  "decoded": [
+    {"station_id": "a", "name": "", "wind_level": null, "rain_m": null},
+    {"station_id": "b", "name": null, "wind_level": "LOW", "rain_m": null},
+    {"station_id": "c", "name": null, "wind_level": null, "rain_m": 0.05}
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "schema": "test.schema.json",
+  "tool": "station_history",
+  "rows": [
+    {"date": "2026-07-01", "name": "a*b"},
+    {"date": "2026-07-02", "name": "a*b"}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\n[2]\nt:2026-07-01|2026-07-02\nn:\"a*b\"*2"
+}

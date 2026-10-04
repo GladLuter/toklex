@@ -1,0 +1,11 @@
+{
+  "schema": "test.schema.json",
+  "tool": "station_history",
+  "rows": [
+    {"date": "2026-07-01", "rain_m": 0.01},
+    {"date": "2026-07-02", "rain_m": 0.01},
+    {"date": "2026-07-04", "rain_m": 0.01}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\n[3]\nt:2026-07-01|2026-07-02|2026-07-04\nv:100*3"
+}

@@ -1,0 +1,12 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [
+    {"station_id": "u1", "n": "x", "a.b": "y"}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\nid|n|a.b\nu1|x|y",
+  "decoded": [
+    {"station_id": "u1", "name": "x", "a": {"b": "y"}}
+  ]
+}

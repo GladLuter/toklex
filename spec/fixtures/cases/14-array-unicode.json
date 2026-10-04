@@ -1,0 +1,9 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [
+    {"station_id": "u1", "labels": [{"name": "Café"}]}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\nid|lb\nu1|[{\"n\":\"Café\"}]"
+}

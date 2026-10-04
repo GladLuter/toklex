@@ -1,0 +1,7 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [],
+  "meta": {"name": "x\ty", "login": "p\fq\u000bz"},
+  "expected": "~tx@{v} i:+ n:\"x\\ty\" lg:\"p\\fq\\u000bz\""
+}

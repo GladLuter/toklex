@@ -1,0 +1,11 @@
+{
+  "schema": "test.schema.json",
+  "tool": "station_history",
+  "rows": [
+    {"date": "2026-07-01", "labels": [{"name": "5*star"}]},
+    {"date": "2026-07-02", "labels": [{"name": "5*star"}]},
+    {"date": "2026-07-04", "labels": [{"name": "a*2"}]}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\n[3]\nt:2026-07-01|2026-07-02|2026-07-04\nlb:[{\"n\":\"5*star\"}]*2|[{\"n\":\"a*2\"}]"
+}

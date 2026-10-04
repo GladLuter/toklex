@@ -1,0 +1,10 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [
+    {"station_id": "st-1", "name": "North Ridge", "wind_level": "MEDIUM", "rain_m": 0.0743},
+    {"station_id": "st-2", "name": "Bay Point", "wind_level": "HIGH", "rain_m": 0.1201}
+  ],
+  "meta": {"date": "2026-09-30"},
+  "expected": "~tx@{v} i:+ t:2026-09-30\nid|n|l|v\nst-1|North Ridge|m|743\nst-2|Bay Point|h|1201"
+}

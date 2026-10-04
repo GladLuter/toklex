@@ -1,0 +1,5 @@
+{
+  "toklex": 1,
+  "id": "Bad-ID",
+  "keys": {"id": "station_id", "n": "name", "v": "rain_m"}
+}

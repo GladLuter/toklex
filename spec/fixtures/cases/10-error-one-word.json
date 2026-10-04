@@ -1,0 +1,6 @@
+{
+  "schema": "test.schema.json",
+  "error": "Failed",
+  "expected": "~tx@{v} i:+ e:\"Failed\"",
+  "decoded_meta": {"e": "Failed"}
+}

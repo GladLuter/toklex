@@ -1,0 +1,8 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [{"station_id": "a", "rain_m": 1e305}],
+  "meta": {},
+  "expected": "~tx@{v} i:+\nid|v\na",
+  "decoded": [{"station_id": "a", "rain_m": null}]
+}

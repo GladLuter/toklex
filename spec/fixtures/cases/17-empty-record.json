@@ -1,0 +1,18 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [
+    {"station_id": "e1", "name": "Alpha"},
+    {"station_id": null, "name": null},
+    {"station_id": "e3", "name": null},
+    {"station_id": null}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\nid|n\ne1|Alpha\n|\ne3\n|",
+  "decoded": [
+    {"station_id": "e1", "name": "Alpha"},
+    {"station_id": null, "name": null},
+    {"station_id": "e3", "name": null},
+    {"station_id": null, "name": null}
+  ]
+}

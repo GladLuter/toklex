@@ -1,0 +1,14 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [
+    {"station_id": "g1", "user": {"login": "octo", "type": "User"}, "labels": [{"name": "bug"}, {"name": "a|b"}]},
+    {"station_id": "g2", "user": {"login": "bot"}, "labels": []}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\nid|us.lg|us.type|lb\ng1|octo|User|[{\"n\":\"bug\"},{\"n\":\"a\\u007cb\"}]\ng2|bot||[]",
+  "decoded": [
+    {"station_id": "g1", "user": {"login": "octo", "type": "User"}, "labels": [{"name": "bug"}, {"name": "a|b"}]},
+    {"station_id": "g2", "user": {"login": "bot", "type": null}, "labels": []}
+  ]
+}

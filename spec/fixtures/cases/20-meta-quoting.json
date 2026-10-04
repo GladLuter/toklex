@@ -1,0 +1,7 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [],
+  "meta": {"date": "2026-09-30", "name": "North \"A\" Ridge", "login": "a|b", "wind_level": "MEDIUM", "rain_m": 0.0743, "user": "12345", "labels": null},
+  "expected": "~tx@{v} i:+ t:2026-09-30 n:\"North \\\"A\\\" Ridge\" lg:\"a\\u007cb\" l:m v:743 us:\"12345\""
+}

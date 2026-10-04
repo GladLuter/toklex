@@ -1,0 +1,33 @@
+{
+  "toklex": 1,
+  "id": "ws",
+  "keys": {
+    "id": "station_id",
+    "n": "name",
+    "c": "terrain",
+    "p": "network",
+    "l": "wind_level",
+    "v": "rain_m",
+    "s": "visibility_km",
+    "u": "snow_m",
+    "d": "hail_m",
+    "t": "date"
+  },
+  "values": {
+    "l": {"l": "LOW", "m": "MEDIUM", "h": "HIGH"},
+    "c": {"co": "coast", "mt": "mountain", "pl": "plain", "va": "valley"},
+    "p": {"na": "net_a", "nb": "net_b", "nc": "net_c"},
+    "e": {"nt": "No such tool.", "nf": "No station with that id."}
+  },
+  "scale": {
+    "v": 10000,
+    "u": 10000,
+    "d": 10000,
+    "s": 10
+  },
+  "instructions": {
+    "rule": "Use only the fields in this reply. Do not compare them with anything else and do not forecast.",
+    "notice": "Readings come straight from the stations. They are not a forecast."
+  },
+  "dense": []
+}

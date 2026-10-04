@@ -1,0 +1,10 @@
+# Toklex protocol. Copyright 2026 Yevgenii Slieptsov (GladLuter). https://github.com/GladLuter/toklex
+cff-version: 1.2.0
+message: If you use this software, please cite it using the metadata from this file.
+title: Toklex
+authors:
+  - given-names: Yevgenii
+    family-names: Slieptsov
+    alias: GladLuter
+repository-code: https://github.com/GladLuter/toklex
+license: Apache-2.0

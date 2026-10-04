@@ -1,0 +1,17 @@
+[
+  {"tool": "get_station", "args": {}, "expected_mode": "safe", "expected_args_after": {}},
+  {"tool": "station_history", "args": {}, "expected_mode": "dense", "expected_args_after": {}},
+  {"tool": "get_station", "args": {"q": "a"}, "expected_mode": "safe", "expected_args_after": {"q": "a"}},
+  {"tool": "station_history", "args": {"q": "a"}, "expected_mode": "dense", "expected_args_after": {"q": "a"}},
+  {"tool": "get_station", "args": {"q": "a", "toklex_mode": "off"}, "expected_mode": "off", "expected_args_after": {"q": "a"}},
+  {"tool": "get_station", "args": {"q": "a", "toklex_mode": "safe"}, "expected_mode": "safe", "expected_args_after": {"q": "a"}},
+  {"tool": "get_station", "args": {"q": "a", "toklex_mode": "dense"}, "expected_mode": "dense", "expected_args_after": {"q": "a"}},
+  {"tool": "get_station", "args": {"q": "a", "toklex_mode": "turbo"}, "expected_mode": "safe", "expected_args_after": {"q": "a"}},
+  {"tool": "station_history", "args": {"q": "a", "toklex_mode": "turbo"}, "expected_mode": "dense", "expected_args_after": {"q": "a"}},
+  {"tool": "station_history", "args": {"q": "a", "toklex_mode": "off"}, "expected_mode": "off", "expected_args_after": {"q": "a"}},
+  {"tool": "station_history", "args": {"q": "a", "toklex_mode": "safe"}, "expected_mode": "safe", "expected_args_after": {"q": "a"}},
+  {"tool": "station_history", "args": {"q": "a", "toklex_mode": "dense"}, "expected_mode": "dense", "expected_args_after": {"q": "a"}},
+  {"tool": "get_station", "args": {"q": "a", "toklex_mode": "OFF"}, "expected_mode": "safe", "expected_args_after": {"q": "a"}},
+  {"tool": "station_history", "args": {"q": "a", "toklex_mode": null}, "expected_mode": "dense", "expected_args_after": {"q": "a"}},
+  {"tool": "get_station", "args": {"toklex_mode": "dense"}, "expected_mode": "dense", "expected_args_after": {}}
+]

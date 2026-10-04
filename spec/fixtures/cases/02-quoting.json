@@ -1,0 +1,14 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [
+    {"station_id": "q1", "name": "A|B"},
+    {"station_id": "q2", "name": "\"Quoted\" Point"},
+    {"station_id": "q3", "name": "Line1\nLine2"},
+    {"station_id": "q4", "name": "5*star"},
+    {"station_id": "q5", "name": "[draft]"},
+    {"station_id": "q6", "name": "O\"Neil"}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\nid|n\nq1|\"A\\u007cB\"\nq2|\"\\\"Quoted\\\" Point\"\nq3|\"Line1\\nLine2\"\nq4|\"5*star\"\nq5|\"[draft]\"\nq6|O\"Neil"
+}

@@ -1,0 +1,6 @@
+{
+  "schema": "test.schema.json",
+  "error": "Something broke.",
+  "expected": "~tx@{v} i:+ e:\"Something broke.\"",
+  "decoded_meta": {"e": "Something broke."}
+}

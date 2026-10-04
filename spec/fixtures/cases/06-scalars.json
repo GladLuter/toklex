@@ -1,0 +1,9 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [
+    {"station_id": "n1", "ok": true, "cnt": 42, "ratio": 0.5, "neg": -3.25, "whole": 5.0, "tiny": 0.0000001, "big": 12345678.9, "flag": false}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\nid|ok|cnt|ratio|neg|whole|tiny|big|flag\nn1|true|42|0.5|-3.25|5|0.0000001|12345678.9|false"
+}

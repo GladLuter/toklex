@@ -1,0 +1,6 @@
+{
+  "toklex": 1,
+  "id": "tx",
+  "keys": {"id": "station_id", "n": "name", "v": "rain_m"},
+  "scale": {"v": 12.5}
+}

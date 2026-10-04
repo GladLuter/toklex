@@ -1,0 +1,6 @@
+{
+  "toklex": 1,
+  "id": "tx",
+  "keys": {"id": "station_id", "l": "wind_level"},
+  "values": {"l": {"l": "LOW", "lo": "LOW", "h": "HIGH"}}
+}

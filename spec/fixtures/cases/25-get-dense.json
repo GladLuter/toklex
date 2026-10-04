@@ -1,0 +1,11 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "mode": "dense",
+  "rows": [
+    {"station_id": "a", "wind_level": "LOW", "rain_m": 0.01},
+    {"station_id": "b", "wind_level": "LOW", "rain_m": 0.02}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\n[2]\nid:a|b\nl:l*2\nv:100|200"
+}

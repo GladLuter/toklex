@@ -1,0 +1,11 @@
+{
+  "toklex": 1,
+  "id": "tx",
+  "keys": { "id": "station_id", "n": "name", "l": "wind_level", "v": "rain_m", "u": "snow_m",
+            "t": "date", "us": "user", "lg": "login", "lb": "labels" },
+  "values": { "l": { "l": "LOW", "m": "MEDIUM", "h": "HIGH" },
+              "e": { "nf": "No station with that id." } },
+  "scale": { "v": 10000, "u": 10000 },
+  "instructions": { "rule": "Use only the fields in this reply." },
+  "dense": ["station_history"]
+}

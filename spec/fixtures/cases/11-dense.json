@@ -1,0 +1,13 @@
+{
+  "schema": "test.schema.json",
+  "tool": "station_history",
+  "rows": [
+    {"date": "2026-07-01", "wind_level": "MEDIUM", "rain_m": 0.0743, "snow_m": null},
+    {"date": "2026-07-02", "wind_level": "MEDIUM", "rain_m": 0.0743, "snow_m": null},
+    {"date": "2026-07-03", "wind_level": "MEDIUM", "rain_m": 0.075, "snow_m": null},
+    {"date": "2026-07-04", "wind_level": "HIGH", "rain_m": 0.08, "snow_m": null},
+    {"date": "2026-07-05", "wind_level": "HIGH", "rain_m": 0.081, "snow_m": 0.0993}
+  ],
+  "meta": {"date": "2026-07-05"},
+  "expected": "~tx@{v} i:+ t:2026-07-05\n[5]\nt:2026-07-01+1d\nl:m*3|h*2\nv:743*2|750|800|810\nu:*4|993"
+}

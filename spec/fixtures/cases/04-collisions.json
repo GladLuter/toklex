@@ -1,0 +1,24 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [
+    {"station_id": "x1", "wind_level": "m"},
+    {"station_id": "x2", "wind_level": "UNKNOWN"},
+    {"station_id": "x3", "name": "12345"},
+    {"station_id": "x4", "name": "true"},
+    {"station_id": "x5", "name": "null"},
+    {"station_id": "x6", "name": "2026-07-03+1d"},
+    {"station_id": "m", "name": "Côte Zéta Höhe"}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\nid|l|n\nx1|\"m\"\nx2|UNKNOWN\nx3||\"12345\"\nx4||\"true\"\nx5||\"null\"\nx6||\"2026-07-03+1d\"\nm||Côte Zéta Höhe",
+  "decoded": [
+    {"station_id": "x1", "wind_level": "m", "name": null},
+    {"station_id": "x2", "wind_level": "UNKNOWN", "name": null},
+    {"station_id": "x3", "wind_level": null, "name": "12345"},
+    {"station_id": "x4", "wind_level": null, "name": "true"},
+    {"station_id": "x5", "wind_level": null, "name": "null"},
+    {"station_id": "x6", "wind_level": null, "name": "2026-07-03+1d"},
+    {"station_id": "m", "wind_level": null, "name": "Côte Zéta Höhe"}
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [],
+  "meta": {"date": "2026-09-30"},
+  "expected": "~tx@{v} i:+ t:2026-09-30"
+}

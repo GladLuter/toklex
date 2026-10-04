@@ -1,0 +1,10 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "mode": "off",
+  "rows": [
+    {"station_id": "s1", "name": "Côte Zéta Höhe", "path": "a/b", "whole": 5.0, "tiny": 0.0000001, "rain_m": 0.0743}
+  ],
+  "meta": {"date": "2026-09-30", "labels": null},
+  "expected": "{\"toklex\":\"off\",\"schema\":\"tx@{v}\",\"instructions\":{\"rule\":\"Use only the fields in this reply.\"},\"meta\":{\"date\":\"2026-09-30\",\"labels\":null},\"rows\":[{\"station_id\":\"s1\",\"name\":\"Côte Zéta Höhe\",\"path\":\"a/b\",\"whole\":5,\"tiny\":0.0000001,\"rain_m\":0.0743}]}"
+}
