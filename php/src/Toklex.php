@@ -436,6 +436,11 @@ TXT;
         if (is_bool($v)) {
             return $v ? 'true' : 'false';
         }
+        $scaled = isset($this->s['scale'][$c]);
+        // a database driver hands numbers over as strings, so a plain decimal in a scaled field is that number (spec 6.3)
+        if ($scaled && is_string($v) && preg_match('/^-?(0|[1-9]\d*)(\.\d+)?$/D', $v)) {
+            $v = json_decode($v);
+        }
         if (is_int($v) || is_float($v)) {
             return self::num($v, $this->s['scale'][$c] ?? null) ?? '';
         }
@@ -446,7 +451,7 @@ TXT;
         if (isset($this->vf[$c][$v])) {
             return (string)$this->vf[$c][$v];
         }
-        $quote = $v === '' || preg_match('/^["\[{]|[|*\n\r]/', $v) || isset($this->s['values'][$c][$v])
+        $quote = $scaled || $v === '' || preg_match('/^["\[{]|[|*\n\r]/', $v) || isset($this->s['values'][$c][$v])
             || preg_match(self::NUM, $v) || in_array($v, ['true', 'false', 'null'], true)
             || preg_match('/^\d{4}-\d{2}-\d{2}\+\d+d$/D', $v) || ($hdr && preg_match('/[\s"]/', $v));
         return $quote ? self::quote($v) : $v;

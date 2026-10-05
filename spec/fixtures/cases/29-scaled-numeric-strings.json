@@ -1,0 +1,29 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [
+    {"station_id": "s1", "rain_m": "0.092375", "name": "0.092375"},
+    {"station_id": "s2", "rain_m": "-0.5"},
+    {"station_id": "s3", "rain_m": "12"},
+    {"station_id": "s4", "rain_m": "0"},
+    {"station_id": "s5", "rain_m": "1e3"},
+    {"station_id": "s6", "rain_m": "007"},
+    {"station_id": "s7", "rain_m": " 12"},
+    {"station_id": "s8", "rain_m": "12abc"},
+    {"station_id": "s9", "rain_m": "NaN"}
+  ],
+  "meta": {"rain_m": "0.0743"},
+  "expected": "~tx@{v} i:+ v:743\nid|v|n\ns1|924|\"0.092375\"\ns2|-5000\ns3|120000\ns4|0\ns5|\"1e3\"\ns6|\"007\"\ns7|\" 12\"\ns8|\"12abc\"\ns9|\"NaN\"",
+  "decoded": [
+    {"station_id": "s1", "rain_m": 0.0924, "name": "0.092375"},
+    {"station_id": "s2", "rain_m": -0.5, "name": null},
+    {"station_id": "s3", "rain_m": 12, "name": null},
+    {"station_id": "s4", "rain_m": 0, "name": null},
+    {"station_id": "s5", "rain_m": "1e3", "name": null},
+    {"station_id": "s6", "rain_m": "007", "name": null},
+    {"station_id": "s7", "rain_m": " 12", "name": null},
+    {"station_id": "s8", "rain_m": "12abc", "name": null},
+    {"station_id": "s9", "rain_m": "NaN", "name": null}
+  ],
+  "decoded_meta": {"rain_m": 0.0743}
+}

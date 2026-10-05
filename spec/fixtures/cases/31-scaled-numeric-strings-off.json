@@ -1,0 +1,10 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "mode": "off",
+  "rows": [
+    {"station_id": "s1", "rain_m": "0.092375"}
+  ],
+  "meta": {"rain_m": "0.0743"},
+  "expected": "{\"toklex\":\"off\",\"schema\":\"tx@{v}\",\"instructions\":{\"rule\":\"Use only the fields in this reply.\"},\"meta\":{\"rain_m\":\"0.0743\"},\"rows\":[{\"station_id\":\"s1\",\"rain_m\":\"0.092375\"}]}"
+}

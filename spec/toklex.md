@@ -49,7 +49,7 @@ The server owner writes the schema as a JSON file.
 - `id` is the schema id. It matches `[a-z][a-z0-9]{0,7}`.
 - `keys` maps a code to a full field name.
 - `values` maps a field code to a map from a code to a full value. The member `e` is reserved for error messages and does not stand for a field.
-- `scale` maps a field code to an integer multiplier. It sets the publication precision of the field, as DECIMAL(10,4) does in a database. A number of that field travels as an integer, `x * multiplier` rounded by section 6.3. A reader divides it back.
+- `scale` maps a field code to an integer multiplier. It sets the publication precision of the field, as DECIMAL(10,4) does in a database. A number of that field travels as an integer, `x * multiplier` rounded by section 6.3. A reader divides it back. A string of that field that holds a plain decimal number counts as that number (section 6.3).
 - `instructions` holds named blocks of text. All of them apply to a reply whose header carries `i:+`.
 - `dense` lists the tools whose default mode is dense (section 7). A tool outside the list defaults to normal mode. The caller can override either default (section 12.2).
 
@@ -141,6 +141,7 @@ An empty result (`rows = []`) is the header line alone, with no line of columns.
 - `null` is an empty cell. Fixture: `03-nulls-missing`.
 - `true` and `false` are written as they are. Fixture: `06-scalars`.
 - A number in a field with a `scale` is written as an integer. Take the shortest decimal text of the number, as the next rule writes it. Multiply that decimal by the multiplier exactly, in decimal arithmetic and not in binary floating point. Round the product to an integer, and round a half away from zero. A result of zero has no minus sign. So 0.00015 with the multiplier 10000 gives 1.5 and becomes `2`, although the binary product of the two is 1.4999999999999998. Fixtures: `01-basic` (0.0743 becomes 743), `03-nulls-missing` (0.05 becomes 500), `08-scale-rounding` (0.123456 becomes 1235, 0.00015 becomes 2, -0.00015 becomes -2, 0.0001499999999999999 becomes 1, -0.00001 becomes 0).
+- A string in a field with a `scale` counts as a number when its whole text is a plain decimal: an optional `-`, an integer part with no leading zero unless the part is `0`, and an optional `.` followed by digits. The encoder writes it by the rule above, so `"0.092375"` with the multiplier 10000 becomes `924`, and a reader returns the number `0.0924`. Database drivers often hand numbers over as strings, and this rule keeps a scaled column made of numbers. A string with an exponent, a `+`, a space, a leading zero or any other text stays a literal and section 6.4 quotes it. Inside an array and in off mode a string stays a string. In a field without a `scale` a string that looks like a number stays a quoted string and keeps its type (section 6.4). Fixtures: `29-scaled-numeric-strings` (`"0.092375"`, `"-0.5"`, `"12"` and `"0"` in a row and `"0.0743"` in the header become numbers, while `"1e3"`, `"007"`, `" 12"`, `"12abc"` and `"NaN"` stay quoted), `30-scaled-numeric-strings-dense`, `31-scaled-numeric-strings-off`.
 - Any other number is written in the shortest decimal form that reads back as the same number, without an exponent. A float with an integral value has no fraction part, so `5.0` is `5`. The text depends only on the number. A setting of the language runtime that changes float printing, such as `serialize_precision` in PHP, does not change it. Fixture: `06-scalars` (`0.0000001`, `12345678.9`, `-3.25`, `5`).
 - A number that is not finite is null, so it is an empty cell, and `null` inside an array or in off mode. This covers infinity and NaN, and also a finite number that becomes infinite when the scale multiplies it. Fixture: `28-overflow-null`.
 - A string that is a full value listed in `values` for this field is written as its code. Fixtures: `01-basic` (`MEDIUM` becomes `m`), `03-nulls-missing`.
@@ -158,6 +159,7 @@ A string is written as a JSON string in double quotes when any of these holds.
 - It parses as a JSON number, by the number grammar of RFC 8259. Fixture: `04-collisions` (`12345`).
 - It equals `true`, `false` or `null`. Fixture: `04-collisions` (`true`, `null`).
 - It looks like a date sequence, which is an ISO date followed by `+`, one or more digits and `d`. Fixture: `04-collisions` (`2026-07-03+1d`).
+- It is in a field with a `scale` and section 6.3 did not read it as a number. So every unquoted cell of a scaled field is a scaled number. Fixture: `29-scaled-numeric-strings` (`"12abc"`).
 
 Inside a quoted string, `|` is written `\u007c`. Fixture: `02-quoting` (`"A\u007cB"`).
 
@@ -287,11 +289,11 @@ An off reply is one JSON object with these members, in this order.
 - A number is written as in section 6.3. A float with an integral value has no fraction part and no number has an exponent, so `5.0` is `5` and `0.0000001` stays `0.0000001`.
 - `toklex` is the string `off`. `schema` names the schema and its version, so a reader can tell which instructions it received.
 - `instructions` holds every instruction block of the schema, name and text, in schema order. The member is left out when the schema has no blocks.
-- `meta` and `rows` carry the metadata and the records as the encoder received them. Names are the full names, values are written as given, and no code or scale is applied. A metadata value that is null stays in `meta`. The header of the other modes leaves it out. `meta` is an object and is `{}` when there is no metadata. `rows` is an array and is `[]` when there are no records.
+- `meta` and `rows` carry the metadata and the records as the encoder received them. Names are the full names, values are written as given, and no code or scale is applied. A string that holds a number stays a string, in a scaled field too. A metadata value that is null stays in `meta`. The header of the other modes leaves it out. `meta` is an object and is `{}` when there is no metadata. `rows` is an array and is `[]` when there are no records.
 - An error reply has the members `toklex`, `schema`, `instructions` and `error`, in this order, and no `meta` or `rows`. The value of `error` is the full message. A message given as a code from `values.e` is written out in full, as it is in section 5.
 - A reader parses the text as JSON. `rows` is the result. An error reply has no `rows`, and its message reads back from `error`.
 
-Fixtures: `21-off-basic` (the rows and metadata of `01-basic`), `22-off-error` (an error given as the code `nf`), `24-off-scalars` (an integral float, a small float, a null metadata value, a non-ASCII name and a `/`).
+Fixtures: `21-off-basic` (the rows and metadata of `01-basic`), `22-off-error` (an error given as the code `nf`), `24-off-scalars` (an integral float, a small float, a null metadata value, a non-ASCII name and a `/`), `31-scaled-numeric-strings-off` (number strings in a scaled field).
 
 ### 12.2 Choosing the mode of a call
 

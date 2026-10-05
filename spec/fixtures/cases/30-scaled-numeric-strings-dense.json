@@ -1,0 +1,21 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "mode": "dense",
+  "rows": [
+    {"station_id": "a", "rain_m": "0.092375"},
+    {"station_id": "b", "rain_m": 0.0924},
+    {"station_id": "c", "rain_m": "12"},
+    {"station_id": "d", "rain_m": "1e3"},
+    {"station_id": "e", "rain_m": "NaN"}
+  ],
+  "meta": {},
+  "expected": "~tx@{v} i:+\n[5]\nid:a|b|c|d|e\nv:924*2|120000|\"1e3\"|\"NaN\"",
+  "decoded": [
+    {"station_id": "a", "rain_m": 0.0924},
+    {"station_id": "b", "rain_m": 0.0924},
+    {"station_id": "c", "rain_m": 12},
+    {"station_id": "d", "rain_m": "1e3"},
+    {"station_id": "e", "rain_m": "NaN"}
+  ]
+}
