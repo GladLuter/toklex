@@ -159,7 +159,7 @@ A string is written as a JSON string in double quotes when any of these holds.
 - It parses as a JSON number, by the number grammar of RFC 8259. Fixture: `04-collisions` (`12345`).
 - It equals `true`, `false` or `null`. Fixture: `04-collisions` (`true`, `null`).
 - It looks like a date sequence, which is an ISO date followed by `+`, one or more digits and `d`. Fixture: `04-collisions` (`2026-07-03+1d`).
-- It is in a field with a `scale` and section 6.3 did not read it as a number. So every unquoted cell of a scaled field is a scaled number. Fixture: `29-scaled-numeric-strings` (`"12abc"`).
+- It is in a field with a `scale` and section 6.3 did not read it as a number. So an unquoted cell of a scaled field that matches the JSON number grammar is a scaled number. The other unquoted cells are empty, `true`, `false`, an array or a value code. Fixture: `29-scaled-numeric-strings` (`"12abc"`, `"+1"`, `".5"`, `"5."`, `"1E-2"`).
 
 Inside a quoted string, `|` is written `\u007c`. Fixture: `02-quoting` (`"A\u007cB"`).
 
@@ -225,7 +225,7 @@ Scaled: v x10000 (743 means 0.0743)
 Dense tools: station_history
 ```
 
-The library appends this contract line to the description of every tool of the server, after two line feeds. It carries the version of the schema. Every tool of the server pays for it in `tools/list`, so it stays short. The modes are described by the `toklex_mode` property, by the tool `toklex_calibrate` and by the resource `toklex://modes`. Appendix A.2 shows the whole tool list.
+The library appends this contract line to the description of every tool of the server, after two line feeds. It carries the version of the schema. Every tool of the server pays for it in `tools/list`, so it stays short. The modes are described by the tool `toklex_calibrate`, by the resource `toklex://modes` and by the schema text. Appendix A.2 shows the whole tool list.
 
 ```
 Toklex reply ~<id>@<version>. If this version is not in context, call toklex_schema first. Never guess a code.
