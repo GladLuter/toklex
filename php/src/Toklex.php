@@ -435,9 +435,9 @@ TXT;
             return $v ? 'true' : 'false';
         }
         $scaled = isset($this->s['scale'][$c]);
-        // a database driver hands numbers over as strings, so a plain decimal in a scaled field is that number (spec 6.3)
+        // a database driver hands numbers over as strings, so a plain decimal in a scaled field is that number, scaled on its digits with no float step (spec 6.3)
         if ($scaled && is_string($v) && preg_match('/^-?(0|[1-9]\d*)(\.\d+)?$/D', $v)) {
-            $v = json_decode($v);
+            return self::scaled($v, self::num($this->s['scale'][$c], null));
         }
         if (is_int($v) || is_float($v)) {
             return self::num($v, $this->s['scale'][$c] ?? null) ?? '';
