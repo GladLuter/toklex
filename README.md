@@ -95,6 +95,21 @@ python bench/tokens.py
 
 `bench/tokens.py` needs `pip install -r bench/requirements.txt`.
 
+## What it costs
+
+Toklex adds a fixed cost to a session. For the example schema and a server with seven tools, counted with o200k_base:
+
+| Part | Tokens |
+|---|---|
+| Contract line and `toklex_mode` on each tool | about 60 per tool, 418 for seven |
+| The tools `toklex_schema` and `toklex_calibrate` | 200 |
+| The reply of `toklex_schema` | 429 |
+| Total for seven tools | 1047 |
+
+The tool list stays in context for the whole session. The schema reply comes once, when the model first calls `toklex_schema`.
+
+In the bench a safe reply saves 967 tokens per call on average against pretty JSON, and a dense reply saves 1120. A session of average calls pays the cost back on its second call. Small replies save less. `get_station` saves 110 tokens in safe mode, so a session made of such calls needs ten of them to break even. A session with one small call costs more than plain JSON.
+
 ## Quick start for PHP
 
 PHP 8.1 or newer. Copy `php/src/Toklex.php` into your project, or install with Composer as `toklex/toklex`.
@@ -121,6 +136,8 @@ switch ($name) {
 ```
 
 Return each reply as one MCP `text` content block and add no `structuredContent`.
+
+Rows from PDO or another database driver can go in as they are. In a scaled field the library reads a number string such as `"0.092375"` as the number.
 
 Other methods:
 
@@ -160,7 +177,7 @@ The version is the first four hex characters of the SHA-256 of the file, with CR
 
 ## Porting to another language
 
-[spec/toklex.md](spec/toklex.md) is the protocol. Appendix A holds every text the model sees, byte for byte. [spec/fixtures/](spec/fixtures/) is the conformance suite. It has 30 encode and decode cases, 15 schemas that must be rejected at load, a mode table and the version hash.
+[spec/toklex.md](spec/toklex.md) is the protocol. Appendix A holds every text the model sees, byte for byte. [spec/fixtures/](spec/fixtures/) is the conformance suite. It has 33 encode and decode cases, 15 schemas that must be rejected at load, a mode table and the version hash.
 
 A port passes when it matches every fixture. For the PHP library:
 
