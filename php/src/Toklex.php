@@ -122,9 +122,7 @@ TXT;
     /** Adds the contract line and toklex_mode to every tool and appends the two Toklex tools. */
     public function withTools(array $tools): array
     {
-        $contract = "Returns Toklex ~{$this->s['id']}@{$this->v}. If you do not have this schema version in context, "
-            . 'call toklex_schema first. Never guess a code. Optional toklex_mode: off, safe or dense. '
-            . 'Call toklex_calibrate once to learn which mode you read reliably.';
+        $contract = "Toklex reply ~{$this->s['id']}@{$this->v}. If this version is not in context, call toklex_schema first. Never guess a code.";
         foreach ($tools as &$t) {
             $d = isset($t['description']) ? $t['description'] . "\n\n" . $contract : $contract;
             if (preg_match_all('/./su', $d) > 2048) {
@@ -135,7 +133,7 @@ TXT;
             $in['properties'] = (array)($in['properties'] ?? []) + ['toklex_mode' => [
                 'type' => 'string',
                 'enum' => self::MODES,
-                'description' => "Reply mode. Leave it out to use the tool's default.",
+                'description' => 'Reply format: off, safe or dense.',
             ]];
             $t['inputSchema'] = $in;
         }

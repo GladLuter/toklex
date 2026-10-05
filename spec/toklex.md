@@ -225,10 +225,10 @@ Scaled: v x10000 (743 means 0.0743)
 Dense tools: station_history
 ```
 
-The library appends this contract line to the description of every tool of the server, after two line feeds. It carries the version of the schema. Appendix A.2 shows the whole tool list.
+The library appends this contract line to the description of every tool of the server, after two line feeds. It carries the version of the schema. Every tool of the server pays for it in `tools/list`, so it stays short. The modes are described by the `toklex_mode` property, by the tool `toklex_calibrate` and by the resource `toklex://modes`. Appendix A.2 shows the whole tool list.
 
 ```
-Returns Toklex ~<id>@<version>. If you do not have this schema version in context, call toklex_schema first. Never guess a code. Optional toklex_mode: off, safe or dense. Call toklex_calibrate once to learn which mode you read reliably.
+Toklex reply ~<id>@<version>. If this version is not in context, call toklex_schema first. Never guess a code.
 ```
 
 Some clients cut a tool description at 2048 characters. The contract line comes last, so a library warns the server author when a description is longer than 2048 characters after the line is appended. It counts Unicode code points.
@@ -313,7 +313,7 @@ A server may publish two MCP resources.
 - `toklex://modes` is a text about the three modes, about how a call picks one and about calibration. Appendix A.3 gives it.
 - `toklex://schema` is the text that `toklex_schema` returns.
 
-A client does not have to load resources, so the tool `toklex_schema` stays the main channel. The contract line (section 9) points to the tools only.
+A client does not have to load resources, so the tool `toklex_schema` stays the main channel. The contract line (section 9) points to the tool `toklex_schema` only.
 
 ## 14. Calibration
 
@@ -380,7 +380,7 @@ The library appends the contract line to the description of every tool of the se
 [
     {
         "name": "get_station",
-        "description": "Get a station.\n\nReturns Toklex ~tx@{v}. If you do not have this schema version in context, call toklex_schema first. Never guess a code. Optional toklex_mode: off, safe or dense. Call toklex_calibrate once to learn which mode you read reliably.",
+        "description": "Get a station.\n\nToklex reply ~tx@{v}. If this version is not in context, call toklex_schema first. Never guess a code.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -391,7 +391,7 @@ The library appends the contract line to the description of every tool of the se
                         "safe",
                         "dense"
                     ],
-                    "description": "Reply mode. Leave it out to use the tool's default."
+                    "description": "Reply format: off, safe or dense."
                 }
             }
         }

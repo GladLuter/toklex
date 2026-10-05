@@ -87,13 +87,11 @@ check('schemaText order', true,
     array_search('Keys: id=station_id, n=name, l=wind_level, v=rain_m, u=snow_m, t=date, us=user, lg=login, lb=labels', $lines, true)
     < array_search('Instructions (they apply to every response marked i:+):', $lines, true));
 
-$contract = "Returns Toklex ~tx@{$v}. If you do not have this schema version in context, call toklex_schema first. "
-    . 'Never guess a code. Optional toklex_mode: off, safe or dense. '
-    . 'Call toklex_calibrate once to learn which mode you read reliably.';
+$contract = "Toklex reply ~tx@{$v}. If this version is not in context, call toklex_schema first. Never guess a code.";
 $tools = $tx->withTools([['name' => 'get_station', 'description' => 'Get a station.', 'inputSchema' => ['type' => 'object', 'properties' => new stdClass()]]]);
 check('withTools returns the tool plus the two Toklex tools', ['get_station', 'toklex_schema', 'toklex_calibrate'], array_column($tools, 'name'));
 check('first description carries the contract', "Get a station.\n\n" . $contract, $tools[0]['description']);
-check('first tool gets toklex_mode', ['type' => 'string', 'enum' => ['off', 'safe', 'dense']], array_intersect_key($tools[0]['inputSchema']['properties']['toklex_mode'], ['type' => 1, 'enum' => 1]));
+check('first tool gets toklex_mode', ['type' => 'string', 'enum' => ['off', 'safe', 'dense'], 'description' => 'Reply format: off, safe or dense.'], $tools[0]['inputSchema']['properties']['toklex_mode']);
 check('tool json keeps properties an object', true, str_contains(json_encode($tools[0]), '"properties":{"toklex_mode":'));
 check('schema tool is read-only', true, $tools[1]['annotations']['readOnlyHint']);
 check('schema tool annotations', ['title' => 'Toklex schema', 'readOnlyHint' => true, 'openWorldHint' => false], $tools[1]['annotations']);
