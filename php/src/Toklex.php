@@ -30,6 +30,15 @@ Pick a mode for one call with the optional argument toklex_mode on a tool of the
 Dense is the shortest form. Some models misread it. To learn which mode you read reliably, call toklex_calibrate without arguments. It returns a small dataset in both forms and six questions. Answer them from the dataset alone, then call toklex_calibrate again with answers, an object that maps each question id to your answer. The reply names the mode to use. Use it with toklex_mode on later calls.
 TXT;
 
+    private const PLAIN_MODES_TEXT = <<<'TXT'
+Toklex modes
+A server that speaks Toklex can answer a tool call in one of three modes.
+off: compact JSON with full field names and numbers as they are.
+safe: a table. The line that starts with ~ is the header, the next line names the columns and each following line is one record, cells separated by |. A column name that ends in (÷K) holds the value times K, so divide the cell by K. This is the default for every tool that the server does not list as dense.
+dense: after the header, a line starting with [N] gives the record count and how to read the block. Each following line holds one column. This is the default for the tools the server lists as dense.
+Pick a mode for one call with the optional argument toklex_mode. The values are off, safe and dense. If you leave it out or send another value, the tool's default mode applies.
+TXT;
+
     private const MAX_RECORDS = 100000;
 
     // The calibration dataset and its key. They belong to the library and never depend on a server schema.
@@ -141,16 +150,19 @@ TXT;
         return implode("\n", $out);
     }
 
-    /** Adds the contract line and toklex_mode to every tool and appends the two Toklex tools. */
+    /** Adds toklex_mode to every tool. Coded style also adds the contract line and appends the two Toklex tools. */
     public function withTools(array $tools): array
     {
+        $plain = $this->style() === 'plain';
         $contract = "Toklex reply ~{$this->s['id']}@{$this->v}. If this version is not in context, call toklex_schema first. Never guess a code.";
         foreach ($tools as &$t) {
-            $d = isset($t['description']) ? $t['description'] . "\n\n" . $contract : $contract;
-            if (preg_match_all('/./su', $d) > 2048) {
-                trigger_error("Toklex: description of tool '{$t['name']}' is over 2048 characters, a client may cut the contract line", E_USER_WARNING);
+            if (!$plain) {
+                $d = isset($t['description']) ? $t['description'] . "\n\n" . $contract : $contract;
+                if (preg_match_all('/./su', $d) > 2048) {
+                    trigger_error("Toklex: description of tool '{$t['name']}' is over 2048 characters, a client may cut the contract line", E_USER_WARNING);
+                }
+                $t['description'] = $d;
             }
-            $t['description'] = $d;
             $in = $t['inputSchema'] ?? ['type' => 'object'];
             $in['properties'] = (array)($in['properties'] ?? []) + ['toklex_mode' => [
                 'type' => 'string',
@@ -160,6 +172,9 @@ TXT;
             $t['inputSchema'] = $in;
         }
         unset($t);
+        if ($plain) {
+            return $tools;
+        }
         $ro = fn(string $title) => ['title' => $title, 'readOnlyHint' => true, 'openWorldHint' => false];
         $tools[] = [
             'name' => self::SCHEMA_TOOL,
@@ -348,7 +363,9 @@ TXT;
 
     public function resources(): array
     {
-        return [
+        return $this->style() === 'plain' ? [
+            ['uri' => 'toklex://modes', 'name' => 'Toklex modes', 'description' => 'The three reply modes and how to pick one.', 'mimeType' => 'text/plain'],
+        ] : [
             ['uri' => 'toklex://modes', 'name' => 'Toklex modes', 'description' => 'The three reply modes, how to pick one and how to calibrate.', 'mimeType' => 'text/plain'],
             ['uri' => 'toklex://schema', 'name' => 'Toklex schema', 'description' => 'The schema text that toklex_schema returns.', 'mimeType' => 'text/plain'],
         ];
@@ -356,9 +373,10 @@ TXT;
 
     public function readResource(string $uri): ?string
     {
+        $plain = $this->style() === 'plain';
         return match ($uri) {
-            'toklex://modes' => self::MODES_TEXT,
-            'toklex://schema' => $this->schemaText(),
+            'toklex://modes' => $plain ? self::PLAIN_MODES_TEXT : self::MODES_TEXT,
+            'toklex://schema' => $plain ? null : $this->schemaText(),
             default => null,
         };
     }

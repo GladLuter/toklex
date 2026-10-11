@@ -364,19 +364,36 @@ $many = $tx->decode("$dh\n[100000]\nn:" . implode('|', array_fill(0, 3000, 'x*10
 check('many max-length runs in one column stop at the record count', [100000, ['name' => 'x'], true], [count($many['rows']), ($many['rows'][99999] ?? []), memory_get_peak_usage() - $mem < 64_000_000]);
 check('runs past the record count are cut, not turned into extra records', 3, count($tx->decode("$dh\n[3]\nn:a*2|b*2|c")['rows']));
 
+$pt = $tp->withTools([['name' => 'get_station', 'description' => 'Get a station.', 'inputSchema' => ['type' => 'object', 'properties' => new stdClass()]]]);
+check('plain withTools adds no tools and no contract', [['get_station'], 'Get a station.'], [array_column($pt, 'name'), $pt[0]['description']]);
+check('plain tool gets toklex_mode', $tools[0]['inputSchema']['properties']['toklex_mode'], $pt[0]['inputSchema']['properties']['toklex_mode']);
+$w = [];
+set_error_handler(function (int $no) use (&$w) { $w[] = $no; return true; });
+$tp->withTools([['name' => 'big', 'description' => str_repeat('x', 2100)]]);
+restore_error_handler();
+check('plain raises no length warning, there is no contract line to cut', [], $w);
+check('plain resources', [['toklex://modes'], null], [array_column($tp->resources(), 'uri'), $tp->readResource('toklex://schema')]);
+check('plain modes text has no em dash or semicolon', false, str_contains($tp->readResource('toklex://modes'), "\u{2014}") || str_contains($tp->readResource('toklex://modes'), ';'));
+
 // --- spec appendix A: every model-facing text, verbatim ---
 
 $spec = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../../spec/toklex.md'));
 preg_match_all('/^```\w*\n(.*?)\n```$/ms', substr($spec, (int)strpos($spec, "\n## Appendix A")), $app);
 $app = array_map(fn($b) => str_replace('{v}', $v, $b), $app[1]);
 $J = JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
-check('appendix A has six blocks', 6, count($app));
+check('appendix A has ten blocks', 10, count($app));
 check('appendix A.1 is the schema text', $text, $app[0] ?? null);
 check('appendix A.2 is the tool list', json_encode($tools, $J), $app[1] ?? null);
 check('appendix A.3 is the resource list', json_encode($tx->resources(), $J), $app[2] ?? null);
 check('appendix A.3 is the modes text', $modes, $app[3] ?? null);
 check('appendix A.4 is the calibration page', $cal, $app[4] ?? null);
 check('appendix A.4 is the graded reply', $grade($right), $app[5] ?? null);
+$c41 = json_decode(file_get_contents("$fx/cases/41-plain-dense.json"), true);
+preg_match('/^\[5\] .*$/m', $tp->encode($c41['tool'], $c41['rows'], $c41['meta']), $cnt);
+check('appendix A.5 is the plain tool list', json_encode($pt, $J), $app[6] ?? null);
+check('appendix A.5 is the plain resource list', json_encode($tp->resources(), $J), $app[7] ?? null);
+check('appendix A.5 is the plain modes text', $tp->readResource('toklex://modes'), $app[8] ?? null);
+check('appendix A.5 is the plain dense count line', $cnt[0] ?? null, $app[9] ?? null);
 check('section 9 holds the contract line', true, str_contains($spec, "```\n" . str_replace("~tx@$v", '~<id>@<version>', $contract) . "\n```"));
 
 if ($fails) {

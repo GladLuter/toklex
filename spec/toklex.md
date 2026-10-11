@@ -520,3 +520,60 @@ With all six answers right, the reply is this JSON text.
 ```json
 {"recommended":"dense","results":{"s1":true,"s2":true,"s3":true,"d1":true,"d2":true,"d3":true}}
 ```
+
+### A.5 Plain style
+
+In plain style `tools/list` holds the tools of the server with one added property, `toklex_mode`, and no Toklex tool. Here it is for a server tool named `get_station` that has no properties.
+
+```json
+[
+    {
+        "name": "get_station",
+        "description": "Get a station.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "toklex_mode": {
+                    "type": "string",
+                    "enum": [
+                        "off",
+                        "safe",
+                        "dense"
+                    ],
+                    "description": "Reply format: off, safe or dense."
+                }
+            }
+        }
+    }
+]
+```
+
+`resources/list` holds this one entry.
+
+```json
+[
+    {
+        "uri": "toklex://modes",
+        "name": "Toklex modes",
+        "description": "The three reply modes and how to pick one.",
+        "mimeType": "text/plain"
+    }
+]
+```
+
+The text of `toklex://modes` is this.
+
+```text
+Toklex modes
+A server that speaks Toklex can answer a tool call in one of three modes.
+off: compact JSON with full field names and numbers as they are.
+safe: a table. The line that starts with ~ is the header, the next line names the columns and each following line is one record, cells separated by |. A column name that ends in (÷K) holds the value times K, so divide the cell by K. This is the default for every tool that the server does not list as dense.
+dense: after the header, a line starting with [N] gives the record count and how to read the block. Each following line holds one column. This is the default for the tools the server lists as dense.
+Pick a mode for one call with the optional argument toklex_mode. The values are off, safe and dense. If you leave it out or send another value, the tool's default mode applies.
+```
+
+The line that follows the header of a dense reply is this, here for five records.
+
+```text
+[5] One line per column: name:v1|v2|… x*K is x repeated K times, start+Nd is a date every N days, an empty cell is null.
+```
