@@ -1,6 +1,6 @@
 # Toklex
 
-Toklex shrinks the replies of MCP tools. Most of a JSON reply is keys, quotes and whitespace, and the model pays for every token of it. In the default style, called plain, a reply is a table. Its first line names the schema and its version, such as `~ws@6425`. The next line holds the full column names. A scaled column says so in its name, as in `rain_m(÷10000)`, and the owner's instructions stand as lines in front of the table. The model needs nothing else to read it.
+Toklex shrinks the replies of MCP tools. Most of a JSON reply is keys, quotes and whitespace, and the model pays for every token of it. In the default style, called plain, a reply is a table. A header line, such as `~ws@6425`, names the schema and its version, and the line after it holds the full column names. A scaled column says so in its name, as in `rain_m(÷10000)`. The owner's instructions stand as lines in front of the header. The model needs nothing else to read it.
 
 The first version of Toklex used short codes for names and values. It is now called coded. The model had to fetch a schema through a tool before it could read a reply. That fetch is an extra turn, and every turn sends the whole context again. In a live run on a production server the extra turn cost more than the codes saved. A plain table keeps most of the saving and has no extra turn. In the offline bench it saves 71% in safe mode where coded saves 76%.
 
@@ -61,7 +61,7 @@ hail_m(÷10000):388|401|905
 
 `743` is `0.0743` because the column name says `(÷10000)`. `mountain*2` means two equal cells in a row. The dense block explains itself on the count line. Nothing has to be fetched.
 
-Coded, safe mode, from the same schema with `"style": "coded"` added. The added member changes the version, so the header reads `f433`:
+Coded, safe mode, from the same schema with `"style": "coded"` added. The version depends on the exact bytes of the file, so the copy used here reads `f433`:
 
 ```
 ~ws@f433 i:+ t:2026-09-30
@@ -108,7 +108,7 @@ These come from the offline bench in [bench/](bench/). The data is synthetic, ge
 | dense | -82% | -88% |
 | off | -33% | -33% |
 
-Claude Haiku and Sonnet read the plain safe table and the plain dense block correctly, scale labels included, with no error.
+Three readers (two Claude Haiku, one Claude Sonnet) answered ten questions on each plain format. The safe table with its `(÷K)` labels scored 30 of 30, and the dense block with its count-line sentence scored 30 of 30.
 
 For coded there is an older test. Haiku answered ten questions per mode, reading only the text. On this dataset one reader per mode scored 10 of 10 in safe, 10 of 10 in dense with every date right, and 8 of 10 in off. Earlier runs on data with the same shape scored 19 of 20 in safe, 19 of 20 in dense with the dates 8 of 8, and 10 of 10 in off. The misses were counts across many rows, a task small models find hard in any format.
 
@@ -225,13 +225,13 @@ A schema is one JSON file. `toklex` and `id` are required, the rest is optional.
 - `id` is up to 8 characters, `[a-z][a-z0-9]{0,7}`.
 - `style` is `plain` or `coded`. Without it the style is plain. A v0.1 schema has no `style`, so it switches to plain unless you add `"style": "coded"`. The file changes then, and so does its version.
 - `instructions_at` is `reply` or `server`. It applies to plain style only. See the quick start.
-- `keys` maps a short code to a field name. In coded style the code is what a reply carries. In plain style a reply carries the name, and `keys` only links a code to `scale`. The codes `i` and `e` are taken by the coded header.
+- `keys` maps a short code to a field name. In coded style the code is what a reply carries. In plain style a reply carries the name, and `keys` only links a code to `scale`. The codes `i` and `e` are reserved in both styles, and the loader rejects them.
 - `values` maps a field code to its value codes. Coded style writes them. Plain style uses only the member `e`, which holds error messages.
 - `scale` maps a field code to an integer of at least 10. A number travels as `x * scale`, rounded half away from zero, and the reader divides it back. Pick the precision you publish, as with DECIMAL(10,4). A code that `keys` does not list stands for itself, so the example above can name `rain_m` directly.
 - `instructions` holds named text blocks. In plain style each one is a line in front of the reply, or goes to the `instructions` field. In coded style all of them apply to a reply marked `i:+`.
 - `dense` lists the tools that answer in dense mode by default.
 
-The loader rejects codes that would be ambiguous in a cell, such as a code with a space, a `|` or a `*`, or one that looks like a number. A field name that is not in `keys` goes out as it is, so list any name that holds a `|`, a `:` or a space.
+The loader rejects codes that would be ambiguous in a cell, such as a code with a space, a `|` or a `*`, or one that looks like a number. A field name that is not in `keys` goes out as it is. In coded style, list any name that holds a `|`, a `:` or a space, so that a code goes out instead. In plain style the name itself is written, and such a name would break the table. A `|` breaks the column line, a `:` breaks a dense line, a space breaks a header key, and a dot reads back as a nested field. The loader rejects these names in `keys`. Do not use them for a field that is not listed either.
 
 The version is the first four hex characters of the SHA-256 of the file, with CRLF turned into LF. Any edit changes it, a space included. In coded style a changed version makes the model fetch the schema again. A needless refetch costs a few tokens. An unnoticed change could make the model read codes wrongly. In plain style the version only names the schema in the header.
 
