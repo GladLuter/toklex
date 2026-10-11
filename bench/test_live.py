@@ -34,7 +34,8 @@ d = tempfile.mkdtemp()
 qf = os.path.join(d, "q.json")
 json.dump([{"id": "q1", "text": "About {item}", "checks": []}], open(qf, "w"))
 a = argparse.Namespace(out=d, server="srv", config=["a=a.json", "b=b.json", "a"], questions=qf, variant="a", runs=2, item="F",
-                       item2="", model="m", mode="dense", first="a", second="b", prompt="Tell me about {item}", timeout=5)
+                       item2="", model="m", mode="dense", first="a", second="b", prompt="Tell me about {item}",
+                       prompt2="Look up {item} again, the data may have changed.", timeout=5)
 live.cmd_run(a)
 assert len(calls) == 2 and os.path.exists(f"{d}/a/q1-2.jsonl")
 assert inputs[0] == "About F Use toklex_mode=dense in every tool call."  # on stdin, which also closes it
@@ -44,7 +45,21 @@ calls.clear(); live.cmd_heal(a)
 assert "--resume" not in calls[0] and calls[1][calls[1].index("--resume") + 1] == "sess-123" and calls[1][calls[1].index("--mcp-config") + 1] == "b.json"
 h = json.load(open(f"{d}/heal/heal.json"))
 assert h["schema_called_fresh"] and h["schema_called_after_new_version"]
-a.variant = None; live.cmd_calibrate(a)  # bare "a" in --config names the variant; sample holds no toklex_calibrate result
+assert inputs[-2] != inputs[-1] and "again" in inputs[-1]  # a resumed session must not get the same question twice
+only = open(os.path.join(HERE, "live", "sample.jsonl"), encoding="utf-8").read().splitlines()  # a run with no data tool call: nothing was checked
+only = "\n".join(l for l in only if "get_station" not in l or '"result"' in l) + "\n"
+def fake_only(cmd, stdout, **kw):
+    stdout.write(only); return subprocess.CompletedProcess(cmd, 0, "", "")
+live.subprocess.run = fake_only; live.cmd_heal(a)
+h = json.load(open(f"{d}/heal/heal.json"))
+assert h["schema_called_fresh"] is None and h["schema_called_after_new_version"] is None, h
+live.subprocess.run = fake_run
+a.variant = None; a.config = ["a=a.json", "b=b.json"]
+try:
+    live.cmd_calibrate(a); raise AssertionError("no SystemExit")
+except SystemExit as e:
+    assert "--variant" in str(e), e
+a.config = ["a=a.json", "b=b.json", "a"]; live.cmd_calibrate(a)  # bare "a" in --config names the variant; sample holds no toklex_calibrate result
 assert json.load(open(f"{d}/calibrate/calibrate.json"))["recommended"] is None
 live.cmd_summarize(a)
 s = json.load(open(f"{d}/summary.json"))

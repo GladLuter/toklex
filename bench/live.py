@@ -105,16 +105,20 @@ def cmd_heal(a):
     schema = f"mcp__{a.server}__toklex_schema"
     first = claude(a, ask(a, fmt(a.prompt, a.item)), config(a, a.first), f"{a.out}/heal/a-{a.first}.jsonl")
     need(first, "heal first run")
-    second = claude(a, ask(a, fmt(a.prompt, a.item)), config(a, a.second), f"{a.out}/heal/b-{a.second}.jsonl", resume=first["session_id"])
+    second = claude(a, ask(a, fmt(a.prompt2, a.item)), config(a, a.second), f"{a.out}/heal/b-{a.second}.jsonl", resume=first["session_id"])
     need(second, "heal second run")
-    res = {"first": a.first, "second": a.second, "schema_called_fresh": schema in first["tools"],
-           "schema_called_after_new_version": schema in second["tools"], "tools_a": first["tools"], "tools_b": second["tools"]}
+    # None = the run made no tool call besides toklex_schema, so there was nothing to check
+    seen = lambda p: (schema in p["tools"]) if any(t != schema for t in p["tools"]) else None
+    res = {"first": a.first, "second": a.second, "schema_called_fresh": seen(first),
+           "schema_called_after_new_version": seen(second), "tools_a": first["tools"], "tools_b": second["tools"]}
     json.dump(res, open(f"{a.out}/heal/heal.json", "w"), indent=2)
     print(json.dumps(res, indent=2))
 
 
 def cmd_calibrate(a):
-    v = a.variant or next(c for c in a.config if "=" not in c)  # `calibrate --config V` names the variant bare
+    v = a.variant or next((c for c in a.config if "=" not in c), None)  # `calibrate --config V` names the variant bare
+    if not v:
+        raise SystemExit("calibrate needs --variant NAME (or a bare NAME in --config)")
     p = claude(a, "Call toklex_calibrate, answer its questions, submit the answers, and tell me the recommended mode.",
                config(a, v), f"{a.out}/calibrate/{v}.jsonl")
     need(p, "calibrate run")
@@ -150,7 +154,8 @@ def cmd_summarize(a):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("cmd", choices=["run", "heal", "calibrate", "summarize"])
+    ap.add_argument("cmd", choices=["run", "heal", "calibrate", "summarize"],
+                    help="heal and calibrate apply to coded servers (they use toklex_schema and toklex_calibrate); the plain style has neither")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "live", "out"), help="default bench/live/out, which git ignores")
     ap.add_argument("--server", help="MCP server name inside the configs")
     ap.add_argument("--config", action="append", default=[], metavar="NAME=FILE", help="variant name -> MCP config (repeatable); calibrate also takes a bare variant name")
@@ -160,7 +165,8 @@ if __name__ == "__main__":
     ap.add_argument("--model", default="sonnet")
     ap.add_argument("--mode", help="appends 'Use toklex_mode=M in every tool call.' to each question")
     ap.add_argument("--first"), ap.add_argument("--second")
-    ap.add_argument("--prompt", default="Tell me about {item} using the available tools.", help="heal question")
+    ap.add_argument("--prompt", default="Tell me about {item} using the available tools.", help="heal question for the first run")
+    ap.add_argument("--prompt2", default="Look up {item} again with the tools, the data may have changed.", help="heal question for the resumed second run")
     ap.add_argument("--timeout", type=int, default=600)
     a = ap.parse_args()
     globals()["cmd_" + a.cmd](a)
