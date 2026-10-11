@@ -14,6 +14,7 @@ final class Toklex
     private const JF = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_LINE_TERMINATORS | JSON_INVALID_UTF8_SUBSTITUTE;
     private const NUM = '/^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/D';
     private const BAR = '\\' . 'u007c';
+    private const DENSE_LINE = 'One line per column: name:v1|v2|… x*K is x repeated K times, start+Nd is a date every N days, an empty cell is null.';
 
     private const PRIMER = <<<'TXT'
 Toklex encodes tool results compactly. Line 1 is the header: ~<schema>@<version>, then i:+ when the instructions below apply, then key:value metadata (e: is an error message). Normal mode: line 2 lists the columns and every following line is one record, cells separated by |. An empty cell is null and trailing empty cells are left out. A cell in double quotes is a literal JSON string, never a code. Inside it, \u007c stands for |. A cell starting with [ is a JSON array that uses the same keys and codes. A dotted column such as us.lg is a nested field. Dense mode: line 2 is [N], the record count, and every following line is key:values for one column in record order, separated by |. x*K means x repeated K times. A value like 2026-07-03+1d means that date for the first record and one more day for each next record. Read codes only from this schema and never guess one. If a response header shows a different version, call toklex_schema again.
@@ -213,7 +214,7 @@ TXT;
             }
         }
         if ($mode === 'dense') {
-            $out[] = '[' . count($flat) . ']';
+            $out[] = '[' . count($flat) . ']' . ($this->style() === 'plain' ? ' ' . self::DENSE_LINE : '');
             foreach ($cols as $p => $c) {
                 $v = array_map(fn($f) => $f[$p][1] ?? null, $flat);
                 $out[] = $this->label($p) . ':' . (self::days($v) ?? self::runs(array_map(fn($x) => $this->cell($x, $c), $v)));
@@ -272,7 +273,7 @@ TXT;
         }
         $rows = [];
         if (isset($l[1])) {
-            if (preg_match('/^\[(\d+)\]$/D', $l[1], $n)) {
+            if (preg_match('/^\[(\d+)\]( .*)?$/D', $l[1], $n)) {
                 $cols = [];
                 (int)$n[1] > self::MAX_RECORDS && throw new \InvalidArgumentException('Toklex: a reply of more than ' . self::MAX_RECORDS . ' records is refused');
                 $grid = array_fill(0, (int)$n[1], []);

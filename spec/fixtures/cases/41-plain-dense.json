@@ -1,0 +1,13 @@
+{
+  "schema": "plain.schema.json",
+  "tool": "station_history",
+  "rows": [
+    {"date": "2026-07-01", "wind_level": "MEDIUM", "rain_m": 0.0743, "snow_m": null},
+    {"date": "2026-07-02", "wind_level": "MEDIUM", "rain_m": 0.0743, "snow_m": null},
+    {"date": "2026-07-03", "wind_level": "MEDIUM", "rain_m": 0.075, "snow_m": null},
+    {"date": "2026-07-04", "wind_level": "HIGH", "rain_m": 0.08, "snow_m": null},
+    {"date": "2026-07-05", "wind_level": "HIGH", "rain_m": 0.081, "snow_m": 0.0993}
+  ],
+  "meta": {"date": "2026-07-05"},
+  "expected": "rule: Use only the fields in this reply.\nnotice: \"Line one.\\nLine two.\"\n~tp@{v} date:2026-07-05\n[5] One line per column: name:v1|v2|… x*K is x repeated K times, start+Nd is a date every N days, an empty cell is null.\ndate:2026-07-01+1d\nwind_level:MEDIUM*3|HIGH*2\nrain_m(÷10000):743*2|750|800|810\nsnow_m(÷10000):*4|993"
+}

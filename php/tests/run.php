@@ -209,6 +209,9 @@ check('plain meta keys i and e are ordinary', true, str_ends_with($tp->encode('g
 $dm = $tp->encode('get_station', [], ['x.rain_m' => 0.0743]);
 check('a dotted meta key is not labelled scaled when its value is not', ["~tp@{$tp->version()} x.rain_m:0.0743", 0.0743],
     [substr($dm, strrpos($dm, "\n") + 1), $tp->decode($dm)['meta']['x.rain_m']]);
+$I = "rule: Use only the fields in this reply.\nnotice: \"Line one.\\nLine two.\"\n";
+check('a plain count line without the sentence still decodes', [['station_id' => 'a'], ['station_id' => 'b']],
+    $tp->decode($I . "~tp@{$tp->version()}\n[2]\nstation_id:a|b")['rows']);
 
 // --- Task 4: dense mode and encoder hardening ---
 
