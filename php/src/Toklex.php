@@ -102,6 +102,13 @@ TXT;
         return $this->v;
     }
 
+    /** The instructions as the model reads them: one "name: text" per block, the text verbatim. It goes into the MCP instructions field. */
+    public function instructionsText(): string
+    {
+        $ins = $this->s['instructions'] ?? [];
+        return implode("\n", array_map(fn($n, $b) => "$n: $b", array_keys($ins), $ins));
+    }
+
     public function schemaText(): string
     {
         $s = $this->s;
@@ -189,7 +196,7 @@ TXT;
         $mode = in_array($mode, self::MODES, true) ? $mode : $this->defaultMode($tool);
         foreach ($meta as $k => $_) {
             $c = (string)($this->kf[$k] ?? self::u8((string)$k));
-            ($c === 'i' || $c === 'e') && throw new \InvalidArgumentException("Toklex: meta key $c is reserved");
+            in_array($c, $this->style() === 'plain' ? ['error'] : ['i', 'e'], true) && throw new \InvalidArgumentException("Toklex: meta key $c is reserved");
         }
         if ($mode === 'off') {
             return $this->off(['meta' => (object)$meta, 'rows' => array_map(fn($r) => (object)$r, array_values($rows))]);
@@ -209,11 +216,11 @@ TXT;
             $out[] = '[' . count($flat) . ']';
             foreach ($cols as $p => $c) {
                 $v = array_map(fn($f) => $f[$p][1] ?? null, $flat);
-                $out[] = "$p:" . (self::days($v) ?? self::runs(array_map(fn($x) => $this->cell($x, $c), $v)));
+                $out[] = $this->label($p) . ':' . (self::days($v) ?? self::runs(array_map(fn($x) => $this->cell($x, $c), $v)));
             }
             return implode("\n", $out);
         }
-        $out[] = implode('|', array_keys($cols));
+        $out[] = implode('|', array_map($this->label(...), array_keys($cols)));
         foreach ($flat as $f) {
             $cells = [];
             foreach ($cols as $p => $c) {
@@ -230,10 +237,12 @@ TXT;
     {
         $e = $this->s['values']['e'] ?? [];
         $code = isset($e[$codeOrText]) ? $codeOrText : array_search($codeOrText, $e, true);
+        $text = $code === false ? $codeOrText : $e[$code];
         if ($mode === 'off') {
-            return $this->off(['error' => $code === false ? $codeOrText : $e[$code]]);
+            return $this->off(['error' => $text]);
         }
-        return $this->header([]) . ' e:' . ($code === false ? self::quote($codeOrText) : $code);
+        return $this->style() === 'plain' ? $this->header([]) . ' error:' . $this->cell($text, 'error', true)
+            : $this->header([]) . ' e:' . ($code === false ? self::quote($codeOrText) : $code);
     }
 
     /** Reads a reply back with full key names and values. */
@@ -243,17 +252,21 @@ TXT;
             $j = json_decode($text, true);
             [$id, $ver] = explode('@', $j['schema'], 2);
             return ['schema' => $id, 'version' => $ver, 'instructions' => isset($j['instructions']),
-                'meta' => isset($j['error']) ? ['e' => $j['error']] : $j['meta'], 'rows' => $j['rows'] ?? []];
+                'meta' => isset($j['error']) ? [$this->style() === 'plain' ? 'error' : 'e' => $j['error']] : $j['meta'], 'rows' => $j['rows'] ?? []];
         }
-        $l = explode("\n", $text);
+        $plain = $this->style() === 'plain';
+        $k = $this->inReply() ? count($this->s['instructions']) : 0;
+        $l = array_slice(explode("\n", $text), $k);
+        $un = fn(string $c) => $plain ? preg_replace('/\(÷\d+\)$/', '', $c) : $c;
         preg_match('/^~([^@ ]+)@(\S+)/', $l[0], $h);
         preg_match_all('/ ([^\s:]+):("(?:[^"\\\\]|\\\\.)*"|\S*)/', $l[0], $m, PREG_SET_ORDER);
-        $ins = false;
+        $ins = $k > 0;
         $meta = [];
         foreach ($m as [, $c, $raw]) {
-            if ($c === 'i') {
+            if ($c === 'i' && !$plain) {
                 $ins = $raw === '+';
             } else {
+                $c = $un($c);
                 $meta[$this->dk[$c] ?? $c] = $this->read($raw, $c);
             }
         }
@@ -276,7 +289,7 @@ TXT;
             foreach ($grid as $cells) {
                 $row = [];
                 foreach ($cols as $i => $col) {
-                    $segs = explode('.', $col);
+                    $segs = explode('.', $un($col));
                     $val = $this->read($cells[$i] ?? '', end($segs));
                     $ref = &$row;
                     foreach ($segs as $sg) {
@@ -406,20 +419,38 @@ TXT;
 
     private function header(array $meta): string
     {
-        $h = "~{$this->s['id']}@{$this->v}" . (($this->s['instructions'] ?? []) ? ' i:+' : '');
+        $ins = $this->s['instructions'] ?? [];
+        $h = '';
+        foreach ($this->inReply() ? $ins : [] as $n => $b) {
+            $h .= "$n: " . (preg_match('/[\r\n]/', $b) ? self::quote($b) : $b) . "\n";
+        }
+        $h .= "~{$this->s['id']}@{$this->v}" . ($ins && $this->style() === 'coded' ? ' i:+' : '');
         foreach ($meta as $k => $v) {
             $c = (string)($this->kf[$k] ?? self::u8((string)$k));
             $t = is_array($v) || is_object($v) ? self::quote($this->js($v, true, $c)) : $this->cell($v, $c, true);
-            $t === '' || $h .= " $c:$t";
+            $t === '' || $h .= ' ' . $this->label($c) . ":$t";
         }
         return $h;
+    }
+
+    /** True when the instruction lines head the reply: plain style with instructions_at reply. */
+    private function inReply(): bool
+    {
+        return $this->style() === 'plain' && ($this->s['instructions_at'] ?? 'reply') === 'reply' && ($this->s['instructions'] ?? []);
+    }
+
+    /** The name a column or meta path is written under: the code path when coded, the full-name path plus (÷K) when plain and the last segment is scaled. */
+    private function label(string $path): string
+    {
+        $m = $this->style() === 'plain' ? $this->sc[substr(strrchr(".$path", '.'), 1)] ?? null : null;
+        return $m ? "$path(÷" . self::num($m, null) . ')' : $path;
     }
 
     private function off(array $tail): string
     {
         $ins = $this->s['instructions'] ?? [];
         return $this->js((object)(['toklex' => 'off', 'schema' => "{$this->s['id']}@{$this->v}"]
-            + ($ins ? ['instructions' => (object)$ins] : []) + $tail), false);
+            + ($ins && ($this->style() === 'coded' || $this->inReply()) ? ['instructions' => (object)$ins] : []) + $tail), false);
     }
 
     /** One record as [dotted column => [code of the last segment, value]]. A non-empty object or map expands, anything else is a cell. */
@@ -618,6 +649,7 @@ TXT;
             self::badCode((string)$c) && $fail("key code $c is not a plain token");
             str_contains((string)$c, '.') && $fail("key code $c holds a dot, which marks a nested column");
             $plain && self::badCode($full) && $fail("name $full of keys.$c is not a plain token");
+            $plain && str_contains($full, '.') && $fail("name $full of keys.$c holds a dot, which marks a nested column");
         }
         count(array_unique($keys)) === count($keys) || $fail('a full name occurs twice in keys');
         $values = $s['values'] ?? [];

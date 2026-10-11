@@ -1,0 +1,8 @@
+{
+  "schema": "plain.schema.json",
+  "tool": "get_station",
+  "rows": [{"station_id":"a","rain_m":"0.092375"}],
+  "meta": {},
+  "expected": "rule: Use only the fields in this reply.\nnotice: \"Line one.\\nLine two.\"\n~tp@{v}\nstation_id|rain_m(÷10000)\na|924",
+  "decoded": [{"station_id":"a","rain_m":0.0924}]
+}

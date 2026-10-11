@@ -1,0 +1,7 @@
+{
+  "schema": "plain.schema.json",
+  "tool": "get_station",
+  "rows": [{"station_id":"st-1","name":"North Ridge","wind_level":"MEDIUM","rain_m":0.0743},{"station_id":"st-2","name":"Bay Point","wind_level":"HIGH","rain_m":0.1201}],
+  "meta": {"date":"2026-09-30"},
+  "expected": "rule: Use only the fields in this reply.\nnotice: \"Line one.\\nLine two.\"\n~tp@{v} date:2026-09-30\nstation_id|name|wind_level|rain_m(÷10000)\nst-1|North Ridge|MEDIUM|743\nst-2|Bay Point|HIGH|1201"
+}

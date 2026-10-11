@@ -202,6 +202,11 @@ check('an object row encodes like the array row', $tx->encode('get_station', $ne
 check('a header value with a tab, form feed or vertical tab is quoted and reads back whole', ["x\ty", "p\fq\vz"],
     array_values($tx->decode($tx->encode('get_station', [], ['name' => "x\ty", 'login' => "p\fq\vz"]))['meta']));
 
+$tp = Toklex::fromFile("$fx/plain.schema.json");
+check('instructionsText is verbatim', "rule: Use only the fields in this reply.\nnotice: Line one.\nLine two.", $tp->instructionsText());
+check('plain meta key error is reserved', [true, true], [throwsInvalid(fn() => $tp->encode('get_station', [], ['error' => 'x'])), throwsInvalid(fn() => $tp->encode('get_station', [], ['error' => 'x'], 'off'))]);
+check('plain meta keys i and e are ordinary', true, str_ends_with($tp->encode('get_station', [], ['e' => 'x']), "~tp@{$tp->version()} e:x"));
+
 // --- Task 4: dense mode and encoder hardening ---
 
 $dh = "~tx@$v i:+";

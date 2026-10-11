@@ -1,0 +1,6 @@
+{
+  "schema": "plain.schema.json",
+  "error": "boom",
+  "expected": "rule: Use only the fields in this reply.\nnotice: \"Line one.\\nLine two.\"\n~tp@{v} error:boom",
+  "decoded_meta": {"error":"boom"}
+}

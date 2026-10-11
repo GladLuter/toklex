@@ -1,0 +1,7 @@
+{
+  "schema": "plain.schema.json",
+  "tool": "get_station",
+  "rows": [],
+  "meta": {"date":"2026-09-30"},
+  "expected": "rule: Use only the fields in this reply.\nnotice: \"Line one.\\nLine two.\"\n~tp@{v} date:2026-09-30"
+}
