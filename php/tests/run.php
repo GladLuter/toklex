@@ -206,6 +206,9 @@ $tp = Toklex::fromFile("$fx/plain.schema.json");
 check('instructionsText is verbatim', "rule: Use only the fields in this reply.\nnotice: Line one.\nLine two.", $tp->instructionsText());
 check('plain meta key error is reserved', [true, true], [throwsInvalid(fn() => $tp->encode('get_station', [], ['error' => 'x'])), throwsInvalid(fn() => $tp->encode('get_station', [], ['error' => 'x'], 'off'))]);
 check('plain meta keys i and e are ordinary', true, str_ends_with($tp->encode('get_station', [], ['e' => 'x']), "~tp@{$tp->version()} e:x"));
+$dm = $tp->encode('get_station', [], ['x.rain_m' => 0.0743]);
+check('a dotted meta key is not labelled scaled when its value is not', ["~tp@{$tp->version()} x.rain_m:0.0743", 0.0743],
+    [substr($dm, strrpos($dm, "\n") + 1), $tp->decode($dm)['meta']['x.rain_m']]);
 
 // --- Task 4: dense mode and encoder hardening ---
 

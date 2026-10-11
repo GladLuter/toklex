@@ -428,7 +428,7 @@ TXT;
         foreach ($meta as $k => $v) {
             $c = (string)($this->kf[$k] ?? self::u8((string)$k));
             $t = is_array($v) || is_object($v) ? self::quote($this->js($v, true, $c)) : $this->cell($v, $c, true);
-            $t === '' || $h .= ' ' . $this->label($c) . ":$t";
+            $t === '' || $h .= ' ' . $this->label($c, $c) . ":$t";
         }
         return $h;
     }
@@ -439,10 +439,10 @@ TXT;
         return $this->style() === 'plain' && ($this->s['instructions_at'] ?? 'reply') === 'reply' && ($this->s['instructions'] ?? []);
     }
 
-    /** The name a column or meta path is written under: the code path when coded, the full-name path plus (÷K) when plain and the last segment is scaled. */
-    private function label(string $path): string
+    /** The name a column or meta path is written under: the code path when coded, the full-name path plus (÷K) when plain and the scale key is scaled. The scale key is the last segment of a column path, and the whole key of a meta entry, as cell() reads it. */
+    private function label(string $path, ?string $key = null): string
     {
-        $m = $this->style() === 'plain' ? $this->sc[substr(strrchr(".$path", '.'), 1)] ?? null : null;
+        $m = $this->style() === 'plain' ? $this->sc[$key ?? substr(strrchr(".$path", '.'), 1)] ?? null : null;
         return $m ? "$path(÷" . self::num($m, null) . ')' : $path;
     }
 
