@@ -8,9 +8,9 @@ Grammar version 1, draft v0.2.
 
 ## 1. What Toklex does
 
-Toklex makes the results of MCP tools smaller. It also delivers the server owner's instructions to the model with every result.
+Toklex makes the results of MCP tools smaller. It also delivers the server owner's instructions to the model, with every result by default.
 
-The server owner writes a schema file. A reply comes in one of two styles (section 2.1). In plain style, the default, the reply explains itself: columns carry their full names, a scaled column says by how much to divide, and the instructions stand in front of the table. The model needs no schema. In coded style, the style of v0.1, the schema holds short key codes, value codes, number scales and blocks of instructions. Every reply starts with a header that names the schema and its version. The model keeps the schema in context. When a header shows a version the model does not have, the model asks for the schema again with the tool `toklex_schema`.
+The server owner writes a schema file. A reply comes in one of two styles (section 2.1). In plain style, the default, the reply explains itself: columns carry their full names, a scaled column says by how much to divide, and by default the instructions stand in front of the table. The model needs no schema. In coded style, the style of v0.1, the schema holds short key codes, value codes, number scales and blocks of instructions. Every reply starts with a header that names the schema and its version. The model keeps the schema in context. When a header shows a version the model does not have, the model asks for the schema again with the tool `toklex_schema`.
 
 A server can answer in three modes: `off`, `safe` and `dense`. The caller may pick one per call. Section 12 describes them.
 
@@ -32,7 +32,7 @@ A library that implements this text fails in three cases only. It loads a broken
 
 A schema has a style, `plain` or `coded`. The member `style` of the schema file (section 3) names it. Plain is the default and counts when the member is absent. Coded is the style of v0.1.
 
-Plain exists because the schema fetch of coded style is a cost of its own. The model has to call `toklex_schema` before it can read a reply. That is one more turn, and every turn sends the whole context again, which costs more than the codes save. A plain table names its columns in full and says how to scale them. It keeps most of the saving and the extra turn is gone.
+Plain exists because the schema fetch of coded style is a cost of its own. The model has to call `toklex_schema` before it can read a reply. That is one more turn, and every turn sends the whole context again. In measurements this cost more than the codes saved. A plain table names its columns in full and says how to scale them. It keeps most of the saving and the extra turn is gone.
 
 | | Plain | Coded |
 |---|---|---|
@@ -43,7 +43,7 @@ Plain exists because the schema fetch of coded style is a cost of its own. The m
 | Error | `error:` and the full text. | `e:` and a code or a quoted text. |
 | Schema tool, contract line, calibration, `toklex://schema` | None. | Yes (sections 9, 13 and 14). |
 
-Modes, cell quoting, runs and date sequences work the same way in both styles. Sections 5 to 8 and 12 give the rules once and say where plain differs. A rule that does not say so holds in both styles.
+Modes, cell quoting, runs and date sequences work the same way in both styles. Sections 5 to 8 and 12 give the rules once and say where plain differs. A rule that does not say so holds in both styles, except in the sections that open by naming one style (5, 9, 13 and 14).
 
 ## 3. Schema file
 
@@ -90,14 +90,14 @@ A library rejects a file that breaks one of these rules, with an error raised at
 - A full value occurs once inside one field of `values`. Fixture: `invalid/value-twice`.
 - Every multiplier in `scale` is an integer. Fixtures: `invalid/scale-fraction`, `invalid/scale-fraction-large`. The second one has a fraction above 10, so it breaks this rule alone.
 - Every multiplier is at least 10. Fixture: `invalid/scale-small`.
-- `keys` has no code `i` and no code `e`. The header owns them: `i:` marks instructions and `e:` carries an error. Fixtures: `invalid/reserved-code`, `invalid/reserved-code-e`.
+- `keys` has no code `i` and no code `e`. The header owns them: `i:` marks instructions and `e:` carries an error. The check holds in plain style too, because key codes are still codes in the schema file. Fixtures: `invalid/reserved-code`, `invalid/reserved-code-e`.
 - A code in `keys` or in a field of `values` is a plain token. It is not empty, it holds no `|`, `*`, `:`, whitespace or `"`, it does not start with `[` or `{`, it does not parse as a JSON number and it is not `true`, `false` or `null`. A code that broke this would make a cell or a column line ambiguous, because the encoder writes a code without quotes. Fixtures: `invalid/value-code-star`, `invalid/value-code-number`, `invalid/key-code-space`.
 - A code in `keys` holds no `.`. A dot in a column name marks a nested field, so a key code with a dot would read back as two keys. Fixture: `invalid/key-code-dot`.
 - A code in a field of `values` does not have the shape of a date sequence, `YYYY-MM-DD+Nd`. In a dense column such a code would read as a run of dates. Fixture: `invalid/value-code-date-sequence`.
 
 In plain style the loader also checks the names, because a reply writes them as they are.
 
-- A full name in `keys` is a plain token by the rule for codes, and it holds no `.`. A `|` or a space in a column name would break the line of columns, and a `.` would read back as a nested path. Fixtures: `invalid/plain-name-pipe`, `invalid/plain-name-dot`.
+- A full name in `keys` is a plain token by the rule for codes, and it holds no `.`. A `|` in a column name would break the line of columns, a `:` would break a dense column line, a space would break a metadata key in the header, and a `.` would read back as a nested path. Fixtures: `invalid/plain-name-pipe`, `invalid/plain-name-dot`.
 - The name of an instruction block is a plain token, so that the line `<name>: <text>` is clear. Fixture: `invalid/plain-instruction-name`.
 
 All the other checks hold in both styles.
@@ -121,7 +121,7 @@ The header names the schema and carries the metadata. In coded style it is the f
 Elements are separated by one space.
 
 - `~<id>@<version>` names the schema. Every case.
-- `i:+` is present when the schema has at least one instruction block. It tells the model that the instructions apply to this reply. Every case, because the test schema has instructions.
+- In coded style `i:+` is present when the schema has at least one instruction block. It tells the model that the instructions apply to this reply. Every case, because the test schema has instructions.
 - Metadata is written as `<key>:<value>`, in the order the encoder received it. The key is the field code, or the original name when the field is not in `keys`. A key that is not in `keys` follows the limits of section 6.1.
 - The value is a cell of that field. Section 6.3 encodes it and section 6.4 quotes it. Two more triggers apply in the header: any whitespace character (space, tab, line feed, vertical tab, form feed or carriage return), and a `"` anywhere in the string. A reader ends a value at the first whitespace, so an unquoted one would be cut there. A quoted value is written as in section 6.4, so a `|` in it is written `\u007c`. Fixtures: `01-basic` (`t:2026-09-30`), `07-empty`, `11-dense`, `20-meta-quoting` (a space, quotes, a pipe, a number-like string, a coded value and a scaled number), `26-meta-whitespace` (a tab, a form feed and a vertical tab).
 - A metadata value that is an array or a map is written as a JSON string. The encoder takes the compact JSON text of section 6.3, with keys and values coded, before the step that writes `|` as `\u007c`. Then it quotes that text by section 6.4, so each `|` becomes `\u007c` once. It starts with `[` or `{`, so section 6.4 quotes it, and a space inside it cannot cut the value. A reader returns that text as a string and does not decode it. Fixture: `27-meta-edge` (`labels` with a `|` inside, and `login` with a string that starts with `{`).
@@ -136,7 +136,7 @@ In plain style the instructions travel in one of two places. The schema member `
 - `reply`, the default. The reply starts with one line per instruction block, in schema order. A line is `<name>: <text>`. A text that holds a line feed or a carriage return is written as a quoted string by section 6.4, so that the block stays on one line. Any other text is written as it is. The header follows the last instruction line. A schema without blocks has no instruction lines. Fixtures: `40-plain-basic` to `48-plain-meta-scaled` and `51-plain-numeric-strings` all start with the two blocks of `plain.schema.json`, and the second one is quoted.
 - `server`. The reply has no instruction lines, and the off reply has no `instructions` member (section 12.1). The library hands the blocks over for the `instructions` field of the MCP handshake: one `<name>: <text>` line per block, the text word for word, joined by a line feed. A text with a line break keeps it there, because nothing is quoted. Fixtures: `49-plain-server`, `50-plain-server-off`.
 
-Use `reply` unless you know that the client passes `instructions` to the model. Clients such as claude.ai, Claude Desktop and the API MCP connector do not pass that field, so a rule placed there never reaches the model. That is why `reply` is the default.
+Use `reply` unless you know that the client passes `instructions` to the model. As of October 2026, clients such as claude.ai, Claude Desktop and the API MCP connector do not pass that field, so a rule placed there never reaches the model. That is why `reply` is the default.
 
 ### 5.2 The plain header
 
@@ -153,7 +153,7 @@ Use `reply` unless you know that the client passes `instructions` to the model. 
 
 ## 6. Normal mode
 
-Normal mode is the default. A reply is the header, a line of columns, and one line per record.
+Normal mode is the default. A reply is the header, a line of columns, and one line per record. Line numbers in sections 6 to 8 count from the header. In plain style the instruction lines come before line 1.
 
 ```
 ~tx@{v} i:+ t:2026-09-30
@@ -269,7 +269,7 @@ snow_m(÷10000):*4|993
 
 A reader reverses the rules above. A reply that starts with `{` is an off reply (section 12.1). Any other reply starts with `~` and its first line is the header. A plain reply with `instructions_at` set to `reply` starts with instruction lines instead, one for each block of the schema. The reader skips that many lines and finds the header on the next one. A block is one line, so the count is the number of blocks. Fixture: `40-plain-basic`, where the second block holds a line break and still takes one line.
 
-- Line 1 gives the schema id, the version, the instruction flag and the metadata. Key codes become full field names. A code in `e` becomes the full message. Fixtures: `09-error-code`, `09-error-code-from-text`, `10-error-text` (`decoded_meta`). In plain style the names are full already. The reader takes the `(÷K)` off the end of a key and divides the value as for a column (see below). `error` is the full message. Fixtures: `43-plain-error-code`, `44-plain-error-word`, `48-plain-meta-scaled`.
+- Line 1 gives the schema id, the version, the instruction flag and the metadata. In plain style the flag is true when the reply has instruction lines, or when an off reply has the `instructions` member. Key codes become full field names. A code in `e` becomes the full message. Fixtures: `09-error-code`, `09-error-code-from-text`, `10-error-text` (`decoded_meta`). In plain style the names are full already. The reader takes the `(÷K)` off the end of a key and divides the value as for a column (see below). `error` is the full message. Fixtures: `43-plain-error-code`, `44-plain-error-word`, `48-plain-meta-scaled`.
 - If there is no line 2, the result has no records. Fixture: `07-empty`.
 - If line 2 matches `[N]`, with or without the sentence of a plain count line, the reply is dense. Otherwise line 2 lists the columns.
 - An unquoted cell is read in this order: empty is null, then a code of the column's field becomes its full value, then a JSON number (divided by the multiplier when the field is scaled), then `true` or `false`, then text that starts with `[` is read as a JSON array and decoded with the schema, which includes turning every string that equals a value code of its key into the full value (section 6.3). Any other text stays a string. Plain style skips the code steps and has no value codes, so `m` in a cell stays `m`. Fixture: `46-plain-code-string`.
@@ -284,7 +284,7 @@ For every other case, reading `expected` returns `rows`. Numbers are compared by
 
 ## 9. The schema tool and the contract line
 
-This section describes the coded style. A plain server adds neither tool, `toklex_schema` or `toklex_calibrate`, and appends no contract line to its tool descriptions. It raises no length warning, because there is no line to cut. Its `tools/list` holds its own tools with the added property `toklex_mode` (appendix A.5). The text of the schema is not needed, since the reply carries what the model has to know.
+This section describes the coded style. A plain server adds neither `toklex_schema` nor `toklex_calibrate`, and appends no contract line to its tool descriptions. It raises no length warning, because there is no line to cut. Its `tools/list` holds its own tools with the added property `toklex_mode` (appendix A.5). The text of the schema is not needed, since the reply carries what the model has to know.
 
 A coded server adds a tool named `toklex_schema`. It takes no arguments and only reads. It returns one text block with these parts, in this order. The server also adds the tool `toklex_calibrate` (section 14).
 
@@ -329,7 +329,7 @@ The folder `cases/` holds 45 files: 33 coded cases (`01` to `31`, where `09` and
 
 These rules are in force. A later version of the fixtures may add cases for them.
 
-- `i:+` is left out of the header when the schema has no instructions.
+- In coded style `i:+` is left out of the header when the schema has no instructions. In plain style a schema without blocks has no instruction lines.
 - In plain style the metadata keys `i` and `e` are ordinary names, and a dotted metadata key such as `x.rain_m` is not scaled, whatever its last name is. `php/tests/run.php` pins both.
 - In plain style a reader accepts a count line that is `[N]` alone. `php/tests/run.php` pins it.
 - In plain style the text for the MCP `instructions` field is one `<name>: <text>` line per block, the text word for word and not quoted. `php/tests/run.php` pins it.
@@ -374,7 +374,7 @@ An off reply is one JSON object with these members, in this order.
 - `toklex` is the string `off`. `schema` names the schema and its version, so a reader can tell which instructions it received.
 - `instructions` holds every instruction block of the schema, name and text, in schema order. The member is left out when the schema has no blocks, and in plain style when `instructions_at` is `server`.
 - `meta` and `rows` carry the metadata and the records as the encoder received them. Names are the full names, values are written as given, and no code or scale is applied. A string that holds a number stays a string, in a scaled field too. A metadata value that is null stays in `meta`. The header of the other modes leaves it out. `meta` is an object and is `{}` when there is no metadata. `rows` is an array and is `[]` when there are no records.
-- An error reply has the members `toklex`, `schema`, `instructions` and `error`, in this order, and no `meta` or `rows`. The value of `error` is the full message. A message given as a code from `values.e` is written out in full, as it is in section 5.
+- An error reply has the members `toklex`, `schema`, `instructions` and `error`, in this order (`instructions` is left out as above), and no `meta` or `rows`. The value of `error` is the full message. A message given as a code from `values.e` is written out in full, as it is in section 5.
 - A reader parses the text as JSON. `rows` is the result. An error reply has no `rows`, and its message reads back from `error`.
 
 Fixtures: `21-off-basic` (the rows and metadata of `01-basic`), `22-off-error` (an error given as the code `nf`), `24-off-scalars` (an integral float, a small float, a null metadata value, a non-ASCII name and a `/`), `31-scaled-numeric-strings-off` (number strings in a scaled field), `42-plain-off` (the plain form of `21-off-basic`, with the instruction blocks in the JSON), `50-plain-server-off` (no `instructions` member).
