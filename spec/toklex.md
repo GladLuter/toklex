@@ -16,11 +16,11 @@ A server can answer in three modes: `off`, `safe` and `dense`. The caller may pi
 
 Toklex encodes records, which are a list of objects, plus metadata. Metadata values are scalars. A tool that returns free text sends it as usual, without Toklex.
 
-A library that implements this text fails in three cases only. It loads a broken schema (section 3.1). Its encoder gets a reserved metadata key, `i` or `e` in coded style and `error` in plain style (section 5). Its reader gets a dense reply that claims more than 100000 records (section 11). Other data does not make it fail. Unknown fields and values go out as they are.
+A library that implements this text fails in four cases only. It loads a broken schema (section 3.1). Its encoder gets a reserved metadata key, `i` or `e` in coded style and `error` in plain style (section 5). Its reader gets a dense reply that claims more than 100000 records (section 11). Its reader gets a reply that has no header line (section 8). Other data does not make it fail. Unknown fields and values go out as they are.
 
 ## 2. Conventions
 
-**Fixtures.** Each rule below names the fixtures that pin it. A bare name such as `02-quoting` is a file in `spec/fixtures/cases/`. A name that starts with `invalid/` is a file in `spec/fixtures/invalid/`. The cases `01` to `31` use `spec/fixtures/test.schema.json`, a coded schema. The cases `40` to `51` use plain schemas. Section 10 describes the fixture formats. Section 11 lists the rules that no fixture pins yet. Section 12 describes the reply modes, section 13 the resources and section 14 calibration. Appendix A gives every text that goes to the model.
+**Fixtures.** Each rule below names the fixtures that pin it. A bare name such as `02-quoting` is a file in `spec/fixtures/cases/`. A name that starts with `invalid/` is a file in `spec/fixtures/invalid/`. The cases `01` to `31` use `spec/fixtures/test.schema.json`, a coded schema. The cases `40` to `53` use plain schemas. Section 10 describes the fixture formats. Section 11 lists the rules that no fixture pins yet. Section 12 describes the reply modes, section 13 the resources and section 14 calibration. Appendix A gives every text that goes to the model.
 
 **Terms.** A record is one object of the result. A field is a key of a record. A column is one field of the result table. A nested field is a column with a dotted name. A cell is the text of one field of one record. A code is a short name from the schema. Coded style writes codes. Plain style writes the full names.
 
@@ -97,10 +97,12 @@ A library rejects a file that breaks one of these rules, with an error raised at
 
 In plain style the loader also checks the names, because a reply writes them as they are.
 
-- A full name in `keys` is a plain token by the rule for codes, and it holds no `.`. A `|` in a column name would break the line of columns, a `:` would break a dense column line, a space would break a metadata key in the header, and a `.` would read back as a nested path. Fixtures: `invalid/plain-name-pipe`, `invalid/plain-name-dot`.
+- A full name in `keys` is a plain token by the rule for codes, and it holds no `.` and no `(÷`. A `|` in a column name would break the line of columns, a `:` would break a dense column line, a space would break a metadata key in the header, and a `.` would read back as a nested path. A reader takes `(÷` at the end of a name for a scale label (section 8) and would strip it from the name. Fixtures: `invalid/plain-name-pipe`, `invalid/plain-name-dot`, `invalid/plain-name-scale-label`.
 - The name of an instruction block is a plain token, so that the line `<name>: <text>` is clear. Fixture: `invalid/plain-instruction-name`.
 
 All the other checks hold in both styles.
+
+A v0.1 schema that has no `style` counts as plain from v0.2 on. If its `keys` hold full names with a space, a `|`, a `:` or a `.`, or its instruction names are not plain tokens, it breaks the plain checks. Adding `"style": "coded"` keeps it working. A library may say so in the message of the error.
 
 ## 4. Version
 
@@ -136,7 +138,7 @@ In plain style the instructions travel in one of two places. The schema member `
 - `reply`, the default. The reply starts with one line per instruction block, in schema order. A line is `<name>: <text>`. A text that holds a line feed or a carriage return is written as a quoted string by section 6.4, so that the block stays on one line. Any other text is written as it is. The header follows the last instruction line. A schema without blocks has no instruction lines. Fixtures: `40-plain-basic` to `48-plain-meta-scaled` and `51-plain-numeric-strings` all start with the two blocks of `plain.schema.json`, and the second one is quoted.
 - `server`. The reply has no instruction lines, and the off reply has no `instructions` member (section 12.1). The library hands the blocks over for the `instructions` field of the MCP handshake: one `<name>: <text>` line per block, the text word for word, joined by a line feed. A text with a line break keeps it there, because nothing is quoted. Fixtures: `49-plain-server`, `50-plain-server-off`.
 
-Use `reply` unless you know that the client passes `instructions` to the model. As of October 2026, clients such as claude.ai, Claude Desktop and the API MCP connector do not pass that field, so a rule placed there never reaches the model. That is why `reply` is the default.
+Use `reply` unless you know that the client passes `instructions` to the model. As of October 2026, clients such as claude.ai, Claude Desktop and the API MCP connector do not pass that field, so a rule placed there never reaches the model. Claude Code passes the field but cuts it at 2048 characters, so a long rule would lose its end. That is why `reply` is the default.
 
 ### 5.2 The plain header
 
@@ -145,7 +147,7 @@ Use `reply` unless you know that the client passes `instructions` to the model. 
 ```
 
 - There is no `i:+`. The instructions are not marked. They stand in front of the header or in the handshake.
-- A metadata key is the name as the encoder received it, because plain style maps no key. When the name is a scaled field of the schema, the key is written `<name>(÷K)`, K being the multiplier, and the value is the scaled integer of section 6.3. A dotted key such as `x.rain_m` is a name of its own and is not scaled. Fixture: `48-plain-meta-scaled`.
+- A metadata key is the name as the encoder received it, because plain style maps no key. When the name is a scaled field of the schema, the key is written `<name>(÷K)`, K being the multiplier, and the value is the scaled integer of section 6.3. A dotted key such as `x.rain_m` is a name of its own and is not scaled. A value that is a list under a scaled key is scaled, and a number under an object member of a map value is written as it is (section 6.3). Fixture: `48-plain-meta-scaled`.
 - The value follows sections 6.3 and 6.4 without value codes, and the header quote triggers of section 5 apply. A null value is left out. Fixtures: `40-plain-basic`, `48-plain-meta-scaled` (`note:"two words"`).
 - `error` is the reserved key. An encoder that receives the metadata key `error` rejects it with an error in every mode. The keys `i` and `e` are ordinary names in plain style.
 - An error is `error:` and the full message. When the message is given as a code of `values.e`, the text is the message of that code. The text is written like any header value, so it is quoted when section 6.4 or the header triggers ask for it. A message with a space is quoted, and `boom` is not. A reply to an error is the instruction lines and the header alone. A reader returns the text as the metadata `error`. Fixtures: `43-plain-error-code`, `44-plain-error-word`.
@@ -209,7 +211,7 @@ An empty result (`rows = []`) is the header line alone, with no line of columns.
 - A number that is not finite is null, so it is an empty cell, and `null` inside an array or in off mode. This covers infinity and NaN, and also a finite number that becomes infinite when the scale multiplies it. Fixture: `28-overflow-null`.
 - In coded style a string that is a full value listed in `values` for this field is written as its code. Fixtures: `01-basic` (`MEDIUM` becomes `m`), `03-nulls-missing`. Plain style has no value codes, so the string is written as it is. Fixture: `40-plain-basic` (`MEDIUM`).
 - Any other string is written as it is, in UTF-8, unless section 6.4 asks for quotes. A space does not trigger quotes, and neither does a `"` inside the string. Fixtures: `01-basic` (`North Ridge`), `02-quoting` (`O"Neil`), `04-collisions` (`UNKNOWN`, `Côte Zéta Höhe`).
-- An array is written as compact JSON without whitespace. Object keys inside it are replaced by key codes, and values are coded with the same schema. Non-ASCII characters and `/` are written as they are, without a `\uXXXX` escape. Every `|` in the JSON text is written `\u007c`. A string inside an array is a JSON string and keeps its JSON quotes. Section 6.4 covers cells only. If such a string equals a value code of its key, the encoder leaves it as it is and a reader turns it into the full value. The text changes in that case, which is a known limit of v0.1. A schema author avoids it by choosing codes that data does not use as text. Fixtures: `05-nested`, `14-array-unicode` (non-ASCII text inside an array), `18-array-code-collision`. In plain style an array keeps the full names as keys and codes no value, so this limit does not exist. A number inside it is scaled when the key it sits under is a scaled name. Fixture: `47-plain-nested-scaled` (`[700,801]` under `rain_m`).
+- An array is written as compact JSON without whitespace. Object keys inside it are replaced by key codes, and values are coded with the same schema. Non-ASCII characters and `/` are written as they are, without a `\uXXXX` escape. Every `|` in the JSON text is written `\u007c`. A string inside an array is a JSON string and keeps its JSON quotes. Section 6.4 covers cells only. If such a string equals a value code of its key, the encoder leaves it as it is and a reader turns it into the full value. The text changes in that case, which is a known limit of v0.1. A schema author avoids it by choosing codes that data does not use as text. Fixtures: `05-nested`, `14-array-unicode` (non-ASCII text inside an array), `18-array-code-collision`. In plain style an array keeps the full names as keys and codes no value, so this limit does not exist. In plain style a number is scaled only where a `(÷K)` label shows it: in the cell of a scaled column, in the value of a scaled metadata key, and in a list directly under such a column or key. A number under an object member inside the JSON is written as it is, whatever the member is called, and a reader does not divide it. Fixtures: `47-plain-nested-scaled` (`[700,801]` under `rain_m`), `52-plain-object-in-array` (`{"rain_m":0.0743}` inside a list). In coded style a number inside an array or an object is scaled when the key it sits under has a scale in the schema.
 
 ### 6.4 Quoted strings
 
@@ -270,6 +272,7 @@ snow_m(÷10000):*4|993
 A reader reverses the rules above. A reply that starts with `{` is an off reply (section 12.1). Any other reply starts with `~` and its first line is the header. A plain reply with `instructions_at` set to `reply` starts with instruction lines instead, one for each block of the schema. The reader skips that many lines and finds the header on the next one. A block is one line, so the count is the number of blocks. Fixture: `40-plain-basic`, where the second block holds a line break and still takes one line.
 
 - Line 1 gives the schema id, the version, the instruction flag and the metadata. In plain style the flag is true when the reply has instruction lines, or when an off reply has the `instructions` member. Key codes become full field names. A code in `e` becomes the full message. Fixtures: `09-error-code`, `09-error-code-from-text`, `10-error-text` (`decoded_meta`). In plain style the names are full already. The reader takes the `(÷K)` off the end of a key and divides the value as for a column (see below). `error` is the full message. Fixtures: `43-plain-error-code`, `44-plain-error-word`, `48-plain-meta-scaled`.
+- If the text has no header line, which happens when a plain reply has fewer lines than the schema has instruction blocks, the reader refuses it with an error.
 - If there is no line 2, the result has no records. Fixture: `07-empty`.
 - If line 2 matches `[N]`, with or without the sentence of a plain count line, the reply is dense. Otherwise line 2 lists the columns.
 - An unquoted cell is read in this order: empty is null, then a code of the column's field becomes its full value, then a JSON number (divided by the multiplier when the field is scaled), then `true` or `false`, then text that starts with `[` is read as a JSON array and decoded with the schema, which includes turning every string that equals a value code of its key into the full value (section 6.3). Any other text stays a string. Plain style skips the code steps and has no value codes, so `m` in a cell stays `m`. Fixture: `46-plain-code-string`.
@@ -278,7 +281,7 @@ A reader reverses the rules above. A reply that starts with `{` is an off reply 
 - Dotted columns rebuild nested objects.
 - In dense mode `x*K` becomes K copies of x, and `<first>+<step>d` becomes N dates.
 - Every column of the table comes back in every record, and a field that a record lacked comes back as null. A case that this changes carries a `decoded` member. Fixtures: `03-nulls-missing`, `04-collisions`, `05-nested` (`user.type` of the second record).
-- A scaled number comes back at the published precision, so `1235` is `0.1235`. Fixture: `08-scale-rounding`. In plain style the multiplier is the one the schema holds for the name, and the label `(÷K)` shows the same number.
+- A scaled number comes back at the published precision, so `1235` is `0.1235`. Fixture: `08-scale-rounding`. In plain style the multiplier is the one the schema holds for the name, and the label `(÷K)` shows the same number. A number under an object member inside a JSON cell is not divided.
 
 For every other case, reading `expected` returns `rows`. Numbers are compared by value, so `5` equals `5.0`.
 
@@ -317,13 +320,13 @@ The schema is not placed in the `instructions` of the server handshake, because 
 All fixtures are in `spec/fixtures/`.
 
 - `test.schema.json` is a coded schema (`"style": "coded"`). It is the schema of the cases `01` to `31`. Its version is in `hash.json`. A change to the schema file changes the version, so `hash.json` must be updated with it.
-- `plain.schema.json` is a plain schema with `instructions_at` absent. It has two instruction blocks, and the second one holds a line break. It is the schema of the cases `40` to `48` and `51`. `plain-server.schema.json` is a plain schema with `"instructions_at": "server"`. It is the schema of the cases `49` and `50`. `hash.json` holds the version of `test.schema.json` only.
+- `plain.schema.json` is a plain schema with `instructions_at` absent. It has two instruction blocks, and the second one holds a line break. It is the schema of the cases `40` to `48` and `51` to `53`. `plain-server.schema.json` is a plain schema with `"instructions_at": "server"`. It is the schema of the cases `49` and `50`. `hash.json` holds the version of `test.schema.json` only.
 - `cases/*.json` hold `{"schema", "tool", "mode", "rows", "meta", "expected", "decoded", "decoded_meta", "decoded_instructions"}`. The member `expected` has the placeholder `{v}` where the version stands. The member `decoded` is present only when reading `expected` cannot return `rows` as given. The member `decoded_meta` is present only when reading `expected` cannot return `meta` as given, null values left out. The member `decoded_instructions` is present only when reading `expected` returns false for the instruction flag. That happens when the reply carries no instructions, as in the cases `49` and `50`. The member `mode` is optional. When it is absent the tool's default mode applies. A library passes a case when `encode(tool, rows, meta, mode)` equals `expected` byte for byte and reading `expected` returns `decoded`, or `rows` when `decoded` is absent, and the metadata that `decoded_meta` or `meta` gives, and the instruction flag that `decoded_instructions` gives, or true.
 - Error cases in `cases/` hold `{"schema", "error", "mode", "expected", "decoded_meta"}`. The member `error` is the code or the full text passed to the error function. The member `mode` is optional as above. The member `decoded_meta` is the metadata that reading `expected` returns. For an off-mode error, reading `expected` returns the message as `e`, or as `error` in plain style.
 - `modes/args.json` is a list of `{"tool", "args", "expected_mode", "expected_args_after"}`. A library passes an entry when the call arguments `args` for `tool` give the mode `expected_mode` and leave `expected_args_after` as the remaining arguments (section 12.2).
 - `invalid/*.json` are schemas that a library must reject at load.
 
-The folder `cases/` holds 45 files: 33 coded cases (`01` to `31`, where `09` and `10` have two files each) and 12 plain cases (`40` to `51`). The folder `invalid/` holds 21 schemas.
+The folder `cases/` holds 47 files: 33 coded cases (`01` to `31`, where `09` and `10` have two files each) and 14 plain cases (`40` to `53`). The folder `invalid/` holds 22 schemas.
 
 ## 11. Rules that no fixture pins
 
@@ -333,12 +336,12 @@ These rules are in force. A later version of the fixtures may add cases for them
 - In plain style the metadata keys `i` and `e` are ordinary names, and a dotted metadata key such as `x.rain_m` is not scaled, whatever its last name is. `php/tests/run.php` pins both.
 - In plain style a reader accepts a count line that is `[N]` alone. `php/tests/run.php` pins it.
 - In plain style the text for the MCP `instructions` field is one `<name>: <text>` line per block, the text word for word and not quoted. `php/tests/run.php` pins it.
-- The off error reply of plain style has the same members as in section 12.1, and a reader returns its message as the metadata `error`.
 - A string that is not valid UTF-8 has each bad byte sequence replaced by U+FFFD (the Unicode replacement character) before anything else happens. This holds for cells, metadata, array strings, field names, error messages and off mode, so data never makes the encoder fail (section 1). A fixture file cannot hold such bytes, so a library test pins it.
 - An object that a language keeps apart from a list or map, such as a PHP `stdClass`, is read as the map it holds. A non-empty one expands into dotted columns and an empty one is the array `[]`, as an empty map is.
 - A reader that meets a column both as a parent and as a nested path, for example `us` and `us.lg`, lets the nested value win. A null parent cell never wipes a nested object, and a null nested cell never replaces a scalar parent.
 - JSON escaping of a backslash, a tab and other control characters follows RFC 8259.
-- Inside an array, a scale applies to the key a number sits under. Value codes in arrays are pinned by `18-array-code-collision`.
+- In coded style, inside an array or an object, a scale applies to the key a number sits under. Value codes in arrays are pinned by `18-array-code-collision`. Plain style scales a number only where a label shows it (section 6.3).
+- A reader refuses a reply that has no header line, for example a plain reply with fewer lines than the schema has instruction blocks. `php/tests/run.php` pins it.
 - A result whose records have no field at all has an empty line of columns, and each record is a single `|`. A reader reads an empty line of columns as no columns.
 - A date column in dense mode with a zero or negative step is not written as a sequence. A zero step is a run (`2026-07-01*3`).
 - A dense reply for records without any field is the header and `[N]`, with no column lines. A reader returns N empty records.
@@ -377,7 +380,7 @@ An off reply is one JSON object with these members, in this order.
 - An error reply has the members `toklex`, `schema`, `instructions` and `error`, in this order (`instructions` is left out as above), and no `meta` or `rows`. The value of `error` is the full message. A message given as a code from `values.e` is written out in full, as it is in section 5.
 - A reader parses the text as JSON. `rows` is the result. An error reply has no `rows`, and its message reads back from `error`.
 
-Fixtures: `21-off-basic` (the rows and metadata of `01-basic`), `22-off-error` (an error given as the code `nf`), `24-off-scalars` (an integral float, a small float, a null metadata value, a non-ASCII name and a `/`), `31-scaled-numeric-strings-off` (number strings in a scaled field), `42-plain-off` (the plain form of `21-off-basic`, with the instruction blocks in the JSON), `50-plain-server-off` (no `instructions` member).
+Fixtures: `21-off-basic` (the rows and metadata of `01-basic`), `22-off-error` (an error given as the code `nf`), `53-plain-off-error` (the plain form of it), `24-off-scalars` (an integral float, a small float, a null metadata value, a non-ASCII name and a `/`), `31-scaled-numeric-strings-off` (number strings in a scaled field), `42-plain-off` (the plain form of `21-off-basic`, with the instruction blocks in the JSON), `50-plain-server-off` (no `instructions` member).
 
 ### 12.2 Choosing the mode of a call
 

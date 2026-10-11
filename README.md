@@ -134,14 +134,14 @@ Plain adds the property `toklex_mode` to each tool and nothing else. The seven t
 
 In the bench a plain safe reply saves 907 tokens per call on average against pretty JSON, and a dense reply saves 1040. A session of average calls pays the cost back on its first call. Small replies save less. `get_station` saves 49 tokens in safe mode, so a session made of such calls needs five of them to break even.
 
-Coded costs more.
+Coded costs more. The table counts the same seven tools with the same descriptions.
 
 | Part | Tokens |
 |---|---|
-| Contract line and `toklex_mode` on each tool | about 60 per tool, 418 for seven |
+| Contract line and `toklex_mode` on each tool | about 59 per tool, 412 for seven |
 | The tools `toklex_schema` and `toklex_calibrate` | 200 |
 | The reply of `toklex_schema` | 429 |
-| Total for seven tools | 1047 |
+| Total for seven tools | 1041 |
 
 The tool list stays in context for the whole session. The schema reply comes once, when the model first calls `toklex_schema`, and it takes an extra turn.
 
@@ -180,7 +180,7 @@ return [
 ];
 ```
 
-Check this before you rely on it. As of October 2026 claude.ai, Claude Desktop and the API MCP connector do not pass `instructions` to the model. A safety rule placed there never reaches it. With `instructions_at` set to `server` no reply carries the rules, `off` replies included.
+Check this before you rely on it. As of October 2026 claude.ai, Claude Desktop and the API MCP connector do not pass `instructions` to the model. A safety rule placed there never reaches it. Claude Code passes the field but cuts it at 2048 characters, so a long rule would lose its end. With `instructions_at` set to `server` no reply carries the rules, `off` replies included.
 
 Other methods:
 
@@ -223,7 +223,7 @@ A schema is one JSON file. `toklex` and `id` are required, the rest is optional.
 ```
 
 - `id` is up to 8 characters, `[a-z][a-z0-9]{0,7}`.
-- `style` is `plain` or `coded`. Without it the style is plain. A v0.1 schema has no `style`, so it switches to plain unless you add `"style": "coded"`. The file changes then, and so does its version.
+- `style` is `plain` or `coded`. Without it the style is plain. A v0.1 schema has no `style`, so it switches to plain unless you add `"style": "coded"`. The file changes then, and so does its version. A v0.1 schema whose `keys` hold a full name with a space, a `|`, a `:` or a `.`, or whose instruction names are not plain tokens, fails to load under plain. Add `"style": "coded"` and it keeps working.
 - `instructions_at` is `reply` or `server`. It applies to plain style only. See the quick start.
 - `keys` maps a short code to a field name. In coded style the code is what a reply carries. In plain style a reply carries the name, and `keys` only links a code to `scale`. The codes `i` and `e` are reserved in both styles, and the loader rejects them.
 - `values` maps a field code to its value codes. Coded style writes them. Plain style uses only the member `e`, which holds error messages.
@@ -231,13 +231,13 @@ A schema is one JSON file. `toklex` and `id` are required, the rest is optional.
 - `instructions` holds named text blocks. In plain style each one is a line in front of the reply, or goes to the `instructions` field. In coded style all of them apply to a reply marked `i:+`.
 - `dense` lists the tools that answer in dense mode by default.
 
-The loader rejects codes that would be ambiguous in a cell, such as a code with a space, a `|` or a `*`, or one that looks like a number. A field name that is not in `keys` goes out as it is. In coded style, list any name that holds a `|`, a `:` or a space, so that a code goes out instead. In plain style the name itself is written, and such a name would break the table. A `|` breaks the column line, a `:` breaks a dense line, a space breaks a header key, and a dot reads back as a nested field. The loader rejects these names in `keys`. Do not use them for a field that is not listed either.
+The loader rejects codes that would be ambiguous in a cell, such as a code with a space, a `|` or a `*`, or one that looks like a number. A field name that is not in `keys` goes out as it is. In coded style, list any name that holds a `|`, a `:` or a space, so that a code goes out instead. In plain style the name itself is written, and such a name would break the table. A `|` breaks the column line, a `:` breaks a dense line, a space breaks a header key, and a dot reads back as a nested field. A name that holds `(÷` would be read as a scale label. The loader rejects all of these names in `keys`. Do not use them for a field that is not listed either.
 
 The version is the first four hex characters of the SHA-256 of the file, with CRLF turned into LF. Any edit changes it, a space included. In coded style a changed version makes the model fetch the schema again. A needless refetch costs a few tokens. An unnoticed change could make the model read codes wrongly. In plain style the version only names the schema in the header.
 
 ## Porting to another language
 
-[spec/toklex.md](spec/toklex.md) is the protocol. Appendix A holds every text the model sees, byte for byte. [spec/fixtures/](spec/fixtures/) is the conformance suite. It has 45 encode and decode cases (33 coded and 12 plain), 21 schemas that must be rejected at load, a mode table and the version hash.
+[spec/toklex.md](spec/toklex.md) is the protocol. Appendix A holds every text the model sees, byte for byte. [spec/fixtures/](spec/fixtures/) is the conformance suite. It has 47 encode and decode cases (33 coded and 14 plain), 22 schemas that must be rejected at load, a mode table and the version hash.
 
 A port passes when it matches every fixture. For the PHP library:
 
