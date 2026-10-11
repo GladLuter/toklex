@@ -32,7 +32,7 @@ TXT;
     private const MAX_RECORDS = 100000;
 
     // The calibration dataset and its key. They belong to the library and never depend on a server schema.
-    private const CAL_SCHEMA = ['toklex' => 1, 'id' => 'cal', 'keys' => ['n' => 'name', 'd' => 'day', 't' => 'tier', 'p' => 'price'],
+    private const CAL_SCHEMA = ['toklex' => 1, 'id' => 'cal', 'style' => 'coded', 'keys' => ['n' => 'name', 'd' => 'day', 't' => 'tier', 'p' => 'price'],
         'values' => ['t' => ['l' => 'LOW', 'm' => 'MEDIUM', 'h' => 'HIGH']], 'scale' => ['p' => 10000]];
     private const CAL_ROWS = [
         ['name' => 'Anna', 'day' => '2026-03-02', 'tier' => 'LOW', 'price' => 0.0612],
@@ -59,13 +59,22 @@ z*3 means z three times. 2026-07-03+1d means 2026-07-03 for the first record and
 Read every code through the legend. A scaled number is divided by its scale.
 TXT;
 
-    private array $kf;
-    private array $vf;
+    private array $kf = [];  // full name -> code, coded only
+    private array $vf = [];  // code -> full value -> value code, coded only
+    private array $dk = [];  // code -> full name for decode, coded only
+    private array $dv = [];  // code -> value code -> full value for decode, coded only
+    private array $sc;       // scale by the name the encoder writes: the code when coded, the full name when plain
 
     private function __construct(private array $s, private string $v)
     {
-        $this->kf = array_flip($s['keys'] ?? []);
-        $this->vf = array_map('array_flip', $s['values'] ?? []);
+        $keys = $s['keys'] ?? [];
+        if (($s['style'] ?? 'plain') === 'coded') {
+            [$this->kf, $this->vf, $this->dk, $this->dv] = [array_flip($keys), array_map('array_flip', $s['values'] ?? []), $keys, $s['values'] ?? []];
+        }
+        $this->sc = [];
+        foreach ($s['scale'] ?? [] as $c => $m) {
+            $this->sc[$this->kf ? $c : ($keys[$c] ?? $c)] = $m;
+        }
     }
 
     /** @throws \InvalidArgumentException when the file is unreadable, not JSON or breaks a load rule */
@@ -81,6 +90,11 @@ TXT;
         }
         self::check($s);
         return new self($s, substr(hash('sha256', str_replace("\r\n", "\n", $raw)), 0, 4));
+    }
+
+    public function style(): string
+    {
+        return $this->s['style'] ?? 'plain';
     }
 
     public function version(): string
@@ -240,7 +254,7 @@ TXT;
             if ($c === 'i') {
                 $ins = $raw === '+';
             } else {
-                $meta[$this->s['keys'][$c] ?? $c] = $this->read($raw, $c);
+                $meta[$this->dk[$c] ?? $c] = $this->read($raw, $c);
             }
         }
         $rows = [];
@@ -274,7 +288,7 @@ TXT;
                             }
                             $ref = [];
                         }
-                        $ref = &$ref[$this->s['keys'][$sg] ?? $sg];
+                        $ref = &$ref[$this->dk[$sg] ?? $sg];
                     }
                     // a null parent cell never wipes the object its nested columns built
                     if ($val !== null || !is_array($ref)) {
@@ -434,13 +448,13 @@ TXT;
         if (is_bool($v)) {
             return $v ? 'true' : 'false';
         }
-        $scaled = isset($this->s['scale'][$c]);
+        $scaled = isset($this->sc[$c]);
         // a database driver hands numbers over as strings, so a plain decimal in a scaled field is that number, scaled on its digits with no float step (spec 6.3)
         if ($scaled && is_string($v) && preg_match('/^-?(0|[1-9]\d*)(\.\d+)?$/D', $v)) {
-            return self::scaled($v, self::num($this->s['scale'][$c], null));
+            return self::scaled($v, self::num($this->sc[$c], null));
         }
         if (is_int($v) || is_float($v)) {
-            return self::num($v, $this->s['scale'][$c] ?? null) ?? '';
+            return self::num($v, $this->sc[$c] ?? null) ?? '';
         }
         if (is_array($v) || is_object($v)) {
             return str_replace('|', self::BAR, $this->js($v, true, $c));
@@ -449,7 +463,7 @@ TXT;
         if (isset($this->vf[$c][$v])) {
             return (string)$this->vf[$c][$v];
         }
-        $quote = $scaled || $v === '' || preg_match('/^["\[{]|[|*\n\r]/', $v) || isset($this->s['values'][$c][$v])
+        $quote = $scaled || $v === '' || preg_match('/^["\[{]|[|*\n\r]/', $v) || isset($this->dv[$c][$v])
             || preg_match(self::NUM, $v) || in_array($v, ['true', 'false', 'null'], true)
             || preg_match('/^\d{4}-\d{2}-\d{2}\+\d+d$/D', $v) || ($hdr && preg_match('/[\s"]/', $v));
         return $quote ? self::quote($v) : $v;
@@ -470,7 +484,7 @@ TXT;
             return '{' . implode(',', $o) . '}';
         }
         if (is_int($x) || is_float($x)) {
-            return self::num($x, $coded ? ($this->s['scale'][$k] ?? null) : null) ?? 'null';
+            return self::num($x, $coded ? ($this->sc[$k] ?? null) : null) ?? 'null';
         }
         if (is_string($x) && $coded && isset($this->vf[$k][$x])) {
             $x = $this->vf[$k][$x];
@@ -548,8 +562,8 @@ TXT;
         if ($t[0] === '"' && is_string($j = json_decode($t))) {
             return $j;
         }
-        if (isset($this->s['values'][$c][$t])) {
-            return $this->s['values'][$c][$t];
+        if (isset($this->dv[$c][$t])) {
+            return $this->dv[$c][$t];
         }
         if (preg_match(self::NUM, $t)) {
             return $this->dec(json_decode($t), $c);
@@ -571,14 +585,14 @@ TXT;
             $o = [];
             foreach ($x as $n => $e) {
                 $c = (string)$n;
-                $o[$list ? $n : ($this->s['keys'][$c] ?? $c)] = $this->dec($e, $list ? $k : $c);
+                $o[$list ? $n : ($this->dk[$c] ?? $c)] = $this->dec($e, $list ? $k : $c);
             }
             return $o;
         }
         if (is_string($x)) {
-            return $this->s['values'][$k][$x] ?? $x;
+            return $this->dv[$k][$x] ?? $x;
         }
-        return (is_int($x) || is_float($x)) && ($m = $this->s['scale'][$k] ?? null) ? $x / $m : $x;
+        return (is_int($x) || is_float($x)) && ($m = $this->sc[$k] ?? null) ? $x / $m : $x;
     }
 
     /** A code that a cell, a column name or a header value could not carry as plain text. */
@@ -592,6 +606,10 @@ TXT;
         $fail = static fn(string $why) => throw new \InvalidArgumentException("Toklex schema: $why");
         ($s['toklex'] ?? null) === 1 || $fail('toklex must be 1');
         (is_string($s['id'] ?? null) && preg_match('/^[a-z][a-z0-9]{0,7}$/D', $s['id'])) || $fail('id must match [a-z][a-z0-9]{0,7}');
+        $plain = ($s['style'] ?? 'plain') !== 'coded';
+        in_array($s['style'] ?? 'plain', ['plain', 'coded'], true) || $fail('style must be plain or coded');
+        in_array($s['instructions_at'] ?? 'reply', ['reply', 'server'], true) || $fail('instructions_at must be reply or server');
+        ($plain || !isset($s['instructions_at'])) || $fail('instructions_at needs style plain');
         $keys = $s['keys'] ?? [];
         is_array($keys) || $fail('keys must be an object');
         foreach ($keys as $c => $full) {
@@ -599,6 +617,7 @@ TXT;
             ((string)$c === 'i' || (string)$c === 'e') && $fail("key code $c is reserved");
             self::badCode((string)$c) && $fail("key code $c is not a plain token");
             str_contains((string)$c, '.') && $fail("key code $c holds a dot, which marks a nested column");
+            $plain && self::badCode($full) && $fail("name $full of keys.$c is not a plain token");
         }
         count(array_unique($keys)) === count($keys) || $fail('a full name occurs twice in keys');
         $values = $s['values'] ?? [];
@@ -620,6 +639,9 @@ TXT;
         }
         $ins = $s['instructions'] ?? [];
         (is_array($ins) && $ins === array_filter($ins, 'is_string')) || $fail('instructions must map names to strings');
+        foreach ($plain ? array_keys($ins) : [] as $name) {
+            self::badCode((string)$name) && $fail("instruction name $name is not a plain token");
+        }
         $dense = $s['dense'] ?? [];
         (is_array($dense) && $dense === array_filter($dense, 'is_string')) || $fail('dense must be a list of tool names');
     }

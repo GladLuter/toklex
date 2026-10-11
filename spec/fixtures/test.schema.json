@@ -1,6 +1,7 @@
 {
   "toklex": 1,
   "id": "tx",
+  "style": "coded",
   "keys": { "id": "station_id", "n": "name", "l": "wind_level", "v": "rain_m", "u": "snow_m",
             "t": "date", "us": "user", "lg": "login", "lb": "labels" },
   "values": { "l": { "l": "LOW", "m": "MEDIUM", "h": "HIGH" },

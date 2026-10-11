@@ -137,18 +137,24 @@ check('model-facing texts hold no CR, whatever the checkout line endings', [fals
 check('modes resource says the two Toklex tools take no toklex_mode', true,
     str_contains($modes, 'The two Toklex tools, toklex_schema and toklex_calibrate, do not take it.'));
 
+check('style of the coded test schema', 'coded', $tx->style());
+check('style defaults to plain', ['plain', 'plain'], [Toklex::fromFile("$fx/plain.schema.json")->style(), Toklex::fromFile(__DIR__ . '/../../examples/stations.schema.json')->style()]);
+
+$txs = [];
 $caseFiles = glob("$fx/cases/*.json");
 check('the case glob finds every fixture', true, count($caseFiles) >= 30);
 foreach ($caseFiles as $f) {
     $name = basename($f, '.json');
     $c = json_decode(file_get_contents($f), true);
-    $exp = str_replace('{v}', $v, $c['expected']);
+    $cx = $txs[$c['schema']] ??= Toklex::fromFile("$fx/{$c['schema']}");
+    $cv = $cx->version();
+    $exp = str_replace('{v}', $cv, $c['expected']);
     $got = isset($c['error'])
-        ? $tx->error($c['error'], $c['mode'] ?? null)
-        : $tx->encode($c['tool'], $c['rows'], $c['meta'], $c['mode'] ?? null);
+        ? $cx->error($c['error'], $c['mode'] ?? null)
+        : $cx->encode($c['tool'], $c['rows'], $c['meta'], $c['mode'] ?? null);
     check("$name encode", $exp, $got);
-    $d = $tx->decode($exp);
-    check("$name decode schema", ['tx', $v, true], [$d['schema'], $d['version'], $d['instructions']]);
+    $d = $cx->decode($exp);
+    check("$name decode schema", [json_decode(file_get_contents("$fx/{$c['schema']}"), true)['id'], $cv, $c['decoded_instructions'] ?? true], [$d['schema'], $d['version'], $d['instructions']]);
     if (isset($c['error'])) {
         check("$name decode meta", $c['decoded_meta'], $d['meta']);
         check("$name decode rows", [], $d['rows']);

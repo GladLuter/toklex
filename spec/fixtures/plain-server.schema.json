@@ -1,0 +1,1 @@
+{"toklex": 1, "id": "ts", "style": "plain", "instructions_at": "server", "keys": {"id": "station_id", "v": "rain_m"}, "scale": {"v": 10000}, "instructions": {"rule": "Use only the fields in this reply."}}
