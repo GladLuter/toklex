@@ -1,0 +1,7 @@
+{
+  "schema": "plain.schema.json",
+  "error": "nf",
+  "mode": "off",
+  "expected": "{\"toklex\":\"off\",\"schema\":\"tp@{v}\",\"instructions\":{\"rule\":\"Use only the fields in this reply.\",\"notice\":\"Line one.\\nLine two.\"},\"error\":\"No station with that id.\"}",
+  "decoded_meta": {"error": "No station with that id."}
+}

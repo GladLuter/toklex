@@ -209,6 +209,15 @@ check('plain meta keys i and e are ordinary', true, str_ends_with($tp->encode('g
 $dm = $tp->encode('get_station', [], ['x.rain_m' => 0.0743]);
 check('a dotted meta key is not labelled scaled when its value is not', ["~tp@{$tp->version()} x.rain_m:0.0743", 0.0743],
     [substr($dm, strrpos($dm, "\n") + 1), $tp->decode($dm)['meta']['x.rain_m']]);
+$mm = $tp->encode('get_station', [], ['stats' => ['rain_m' => 0.0743]]);
+check('plain: a number under an object member of a meta map is written as it is and reads back whole', ["~tp@{$tp->version()} stats:\"{\\\"rain_m\\\":0.0743}\"", 0.0743],
+    [substr($mm, strrpos($mm, "\n") + 1), json_decode($tp->decode($mm)['meta']['stats'], true)['rain_m']]);
+check('plain: a decoded object member is not divided', [['station_id' => 'a', 'readings' => [['rain_m' => 0.0743]]]], $tp->decode($tp->encode('get_station', [['station_id' => 'a', 'readings' => [['rain_m' => 0.0743]]]]))['rows']);
+check('plain decode of a reply with fewer lines than instruction blocks is refused', [true, true], [throwsInvalid(fn() => $tp->decode('rule: x')), throwsInvalid(fn() => $tp->decode(''))]);
+check('a plain loader failure on a v0.1 name hints at style coded', true, (function () use ($fx) {
+    try { Toklex::fromFile("$fx/invalid/plain-name-pipe.json"); } catch (\InvalidArgumentException $e) { return str_contains($e->getMessage(), '(add "style": "coded" to keep v0.1 names)') && !str_contains($e->getMessage(), "\n"); }
+    return false;
+})());
 $I = "rule: Use only the fields in this reply.\nnotice: \"Line one.\\nLine two.\"\n";
 check('a plain count line without the sentence still decodes', [['station_id' => 'a'], ['station_id' => 'b']],
     $tp->decode($I . "~tp@{$tp->version()}\n[2]\nstation_id:a|b")['rows']);

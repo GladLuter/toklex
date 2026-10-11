@@ -274,7 +274,7 @@ TXT;
         $k = $this->inReply() ? count($this->s['instructions']) : 0;
         $l = array_slice(explode("\n", $text), $k);
         $un = fn(string $c) => $plain ? preg_replace('/\(÷\d+\)$/', '', $c) : $c;
-        preg_match('/^~([^@ ]+)@(\S+)/', $l[0], $h);
+        preg_match('/^~([^@ ]+)@(\S+)/', $l[0] ?? '', $h) || throw new \InvalidArgumentException('Toklex: the reply has no header line');
         preg_match_all('/ ([^\s:]+):("(?:[^"\\\\]|\\\\.)*"|\S*)/', $l[0], $m, PREG_SET_ORDER);
         $ins = $k > 0;
         $meta = [];
@@ -529,7 +529,7 @@ TXT;
             $o = [];
             foreach ((array)$x as $n => $e) {
                 $c = (string)($coded ? ($this->kf[$n] ?? $n) : $n);
-                $o[] = json_encode($c, self::JF) . ':' . $this->js($e, $coded, $c);
+                $o[] = json_encode($c, self::JF) . ':' . $this->js($e, $coded, $this->style() === 'coded' ? $c : ''); // plain scales no member of an object (spec 6.3)
             }
             return '{' . implode(',', $o) . '}';
         }
@@ -635,7 +635,7 @@ TXT;
             $o = [];
             foreach ($x as $n => $e) {
                 $c = (string)$n;
-                $o[$list ? $n : ($this->dk[$c] ?? $c)] = $this->dec($e, $list ? $k : $c);
+                $o[$list ? $n : ($this->dk[$c] ?? $c)] = $this->dec($e, $list ? $k : ($this->style() === 'coded' ? $c : ''));
             }
             return $o;
         }
@@ -654,6 +654,7 @@ TXT;
     private static function check(array $s): void
     {
         $fail = static fn(string $why) => throw new \InvalidArgumentException("Toklex schema: $why");
+        $hint = ' (add "style": "coded" to keep v0.1 names)';
         ($s['toklex'] ?? null) === 1 || $fail('toklex must be 1');
         (is_string($s['id'] ?? null) && preg_match('/^[a-z][a-z0-9]{0,7}$/D', $s['id'])) || $fail('id must match [a-z][a-z0-9]{0,7}');
         $plain = ($s['style'] ?? 'plain') !== 'coded';
@@ -667,8 +668,9 @@ TXT;
             ((string)$c === 'i' || (string)$c === 'e') && $fail("key code $c is reserved");
             self::badCode((string)$c) && $fail("key code $c is not a plain token");
             str_contains((string)$c, '.') && $fail("key code $c holds a dot, which marks a nested column");
-            $plain && self::badCode($full) && $fail("name $full of keys.$c is not a plain token");
-            $plain && str_contains($full, '.') && $fail("name $full of keys.$c holds a dot, which marks a nested column");
+            $plain && self::badCode($full) && $fail("name $full of keys.$c is not a plain token$hint");
+            $plain && str_contains($full, '.') && $fail("name $full of keys.$c holds a dot, which marks a nested column$hint");
+            $plain && str_contains($full, '(÷') && $fail("name $full of keys.$c holds (÷, which a reader takes for a scale label$hint");
         }
         count(array_unique($keys)) === count($keys) || $fail('a full name occurs twice in keys');
         $values = $s['values'] ?? [];
@@ -691,7 +693,7 @@ TXT;
         $ins = $s['instructions'] ?? [];
         (is_array($ins) && $ins === array_filter($ins, 'is_string')) || $fail('instructions must map names to strings');
         foreach ($plain ? array_keys($ins) : [] as $name) {
-            self::badCode((string)$name) && $fail("instruction name $name is not a plain token");
+            self::badCode((string)$name) && $fail("instruction name $name is not a plain token$hint");
         }
         $dense = $s['dense'] ?? [];
         (is_array($dense) && $dense === array_filter($dense, 'is_string')) || $fail('dense must be a list of tool names');
