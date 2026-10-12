@@ -163,7 +163,7 @@ Plain sessions, 2026-10-11, 3 questions with 3 runs each, average per question:
 
 There were no schema calls. Dense in this run has no result, because one question lost two runs to a usage limit.
 
-Reading: no misread numbers in the plain answers. In 2 of 9 answers the model showed the raw form to the user, such as `1032 (÷10000 = 10.32%)`. The value is right and the label leaked into the answer.
+Reading: no misread numbers in the plain answers. In 2 of 9 answers the model showed the raw form to the user, such as `1032 (÷10000 = 10.32%)`. The value is right and the label leaked into the answer. The advice under `scale` in "Writing a schema" avoids this.
 
 The samples are small. The turn count varies within a variant about as much as between variants. Read the plain result as "the per-session penalty is gone" and not as "saves 5%". The context of about 57,000 tokens per turn includes the tester's own plugins. That inflates the absolute numbers and shrinks the relative effect of smaller replies. Comparisons within a run are fair.
 
@@ -269,6 +269,8 @@ A schema is one JSON file. `toklex` and `id` are required, the rest is optional.
 - `keys` maps a short code to a field name. In coded style the code is what a reply carries. In plain style a reply carries the name, and `keys` only links a code to `scale`. The codes `i` and `e` are reserved in both styles, and the loader rejects them.
 - `values` maps a field code to its value codes. Coded style writes them. Plain style uses only the member `e`, which holds error messages.
 - `scale` maps a field code to an integer of at least 10. A number travels as `x * scale`, rounded half away from zero, and the reader divides it back. Pick the precision you publish, as with DECIMAL(10,4). A code that `keys` does not list stands for itself, so the example above can name `rain_m` directly.
+
+  Advice for a number that a person will read: a scaled field saves tokens, but the model may repeat the scale to the person it answers. In the production run, 2 of 9 plain answers showed the raw form, such as `1032 (÷10000 = 10.32%)`. In a later test, Claude Sonnet got the same table in two forms and wrote four answers for a user per form. With `rain_m(÷10000)` cells, all values were right and 3 of 4 answers explained the scaling ("divided by 10,000"). With the values in the user's unit (`rain_mm`, cell `80.1`), all values were right and none mentioned a conversion. The unit form cost 16% more tokens for that table, which had two scaled columns of five. So send such a number in the unit the person sees, rounded to the precision you publish. Put the unit in the field name (`rain_mm`, `share_pct`) and leave the field out of `scale`. Keep `scale` for numbers that the model uses but rarely quotes. The library does not change.
 - `instructions` holds named text blocks. In plain style each one is a line in front of the reply, or goes to the `instructions` field. In coded style all of them apply to a reply marked `i:+`.
 - `dense` lists the tools that answer in dense mode by default.
 
