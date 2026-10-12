@@ -163,9 +163,37 @@ Plain sessions, 2026-10-11, 3 questions with 3 runs each, average per question:
 
 There were no schema calls. Dense in this run has no result, because one question lost two runs to a usage limit.
 
-Reading: no misread numbers in the plain answers. In 2 of 9 answers the model showed the raw form to the user, such as `1032 (÷10000 = 10.32%)`. The value is right and the label leaked into the answer. The advice under `scale` in "Writing a schema" is about this.
+Reading: no misread numbers in the plain answers. In 2 of 9 answers the model showed the raw form to the user, such as `1032 (÷10000 = 10.32%)`. The value is right and the label leaked into the answer. The advice under `scale` in "Writing a schema" is about this. The follow-up run below had no leak.
 
 The samples are small. The turn count varies within a variant about as much as between variants. Read the plain result as "the per-session penalty is gone" and not as "saves 5%". The context of about 57,000 tokens per turn includes the tester's own plugins. That inflates the absolute numbers and shrinks the relative effect of smaller replies. Comparisons within a run are fair.
+
+After the label leak, the server sent each number a person reads in that person's unit: percent with two decimals, and one field with one decimal. It dropped `scale`. The library did not change. This run is from 2026-10-12.
+
+Replies from all seven tools, o200k_base, against the JSON route (7934 tokens):
+
+| | off | safe | dense |
+|---|---|---|---|
+| Tokens | 5988 (-25%) | 3649 (-54%) | 3221 (-59%) |
+
+Against the scaled form of the day before (safe 3417, dense 3065), safe is 6.8% longer and dense 5.1% longer.
+
+Sessions with Claude Sonnet in Claude Code, 3 questions with 3 runs each, JSON and plain in one window, average per question:
+
+| | JSON | plain |
+|---|---|---|
+| Turns | 4.00 | 4.11 (+3%) |
+| Input tokens | 230,486 | 234,614 (+2%) |
+| of which cache writes | 28,980 | 22,566 (-22%) |
+| of which cache reads | 201,499 | 212,041 (+5%) |
+| Output tokens | 913 | 921 |
+| Cost | $0.165 | $0.142 (-14%) |
+| Tool-result tokens | 2719 | 1168 (-57%) |
+
+There were no schema calls. The model showed the raw form to the user in 0 of 9 answers, down from 2 of 9. All values matched the server's own figures.
+
+Cost falls while input does not because almost all input is the repeated context, read from the prompt cache. A shorter tool reply mostly saves cache writes, and a cache write costs 12.5 times a cache read. So the saving shows in cost and in cache writes, and not in total input tokens.
+
+The cache-write drop (6.4 thousand per question) is larger than the reply drop (1.5 thousand), so part of it is noise from which sessions hit a warm cache. Across the two plain runs, cost was 5% and 14% below JSON. The direction held and the size is not settled. Turns and input were 2-3% above JSON in this run and below it in the previous one, which is within the spread.
 
 ## What it costs
 
