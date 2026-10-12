@@ -13,6 +13,14 @@ assert r["usage"]["output_tokens"] == 50
 assert [n for n, _ in r["results"]] == r["tools"]
 assert r["results"][1][1] == "id,name\n7,North Ridge" and r["results"][0][1] == "legend: a=alpha b=beta"
 
+import json, tempfile
+with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8") as f:  # a string message must not crash parse
+    f.write('{"type":"system","subtype":"permission_denied","message":"WebSearch is not allowed"}\n')
+    f.write('{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__srv__get_station"}]}}\n')
+    f.write('{"type":"result","result":"done","num_turns":2}\n')
+r2 = live.parse(f.name); os.unlink(f.name)
+assert r2["tools"] == ["mcp__srv__get_station"] and r2["final"] == "done", r2
+
 assert live.fmt("Compare {item} and {item2}", "A", "B") == "Compare A and B"
 assert live.fmt("Compare {item}", "A", None) == "Compare A"
 assert live.fmt('Return {"x": 1} for {item}', "A", "B") == 'Return {"x": 1} for A'

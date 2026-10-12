@@ -14,7 +14,8 @@ def parse(path):
             e = json.loads(line)
         except ValueError:  # blank or truncated line (killed run)
             continue
-        content = (e.get("message") or {}).get("content")
+        m = e.get("message")  # a string on permission_denied events
+        content = m.get("content") if isinstance(m, dict) else None
         for b in content if isinstance(content, list) else []:
             if e["type"] == "assistant" and b.get("type") == "tool_use":
                 names[b["id"]] = b["name"]
