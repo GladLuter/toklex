@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toklex"
+version = "0.3.0"
+description = "Compact MCP tool results with a schema the model reads. Python port of the Toklex protocol."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "Yevgenii Slieptsov" }]
+keywords = ["mcp", "llm", "tokens", "compression", "model-context-protocol"]
+classifiers = ["Programming Language :: Python :: 3", "Operating System :: OS Independent"]
+
+[project.urls]
+Homepage = "https://github.com/GladLuter/toklex"
+Source = "https://github.com/GladLuter/toklex"
+Issues = "https://github.com/GladLuter/toklex/issues"
+
+[tool.setuptools]
+packages = ["toklex"]
