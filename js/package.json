@@ -1,0 +1,27 @@
+{
+  "name": "toklex",
+  "version": "0.3.0",
+  "description": "Compact MCP tool results with a schema the model reads. TypeScript port of the Toklex protocol.",
+  "license": "Apache-2.0",
+  "author": "Yevgenii Slieptsov",
+  "homepage": "https://github.com/GladLuter/toklex",
+  "repository": { "type": "git", "url": "git+https://github.com/GladLuter/toklex.git", "directory": "js" },
+  "bugs": "https://github.com/GladLuter/toklex/issues",
+  "keywords": ["mcp", "llm", "tokens", "compression", "model-context-protocol"],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist", "src"],
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node test/run.ts",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.8.0"
+  }
+}
