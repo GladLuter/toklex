@@ -129,29 +129,45 @@ def cmd_calibrate(a):
     print(json.dumps(res, indent=2))
 
 
+def stats(xs):
+    """Mean, sample standard deviation and count. A small sample varies a lot, so a table shows the spread too."""
+    m = sum(xs) / len(xs) if xs else 0.0
+    sd = (sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) ** .5 if len(xs) > 1 else 0.0
+    return dict(mean=round(m, 6), stdev=round(sd, 6), n=len(xs))
+
+
 def cmd_summarize(a):
-    import tiktoken
-    enc = tiktoken.get_encoding("o200k_base")
+    import tokens
+    count = tokens.make_counter(a.counter, a.count_model)
     out = {}
+    keys = ("input_tokens", "output_tokens", "cost", "turns", "tool_result_tokens")
     # heal/ and calibrate/ are scenarios, not variants, so they stay out of the totals
     for d in sorted(x for x in glob.glob(f"{a.out}/*") if os.path.isdir(x) and os.path.basename(x) not in ("heal", "calibrate")):
-        s = dict(input_tokens=0, cost=0.0, turns=0, tool_result_tokens=0, runs=[], failed=[])
+        s = dict(input_tokens=0, output_tokens=0, cost=0.0, turns=0, tool_result_tokens=0, runs=[], failed=[])
+        per = {k: [] for k in keys}
+        by_q = {}
         for f in sorted(glob.glob(f"{d}/*.jsonl")):
             p = parse(f)
+            run = os.path.basename(f)[:-6]
             if not p["ok"]:  # failed runs are listed, never counted into the totals
                 err = f[:-6] + ".err"
-                s["failed"].append(dict(run=os.path.basename(f)[:-6], error=open(err, encoding="utf-8").read() if os.path.exists(err) else p["error"]))
+                s["failed"].append(dict(run=run, error=open(err, encoding="utf-8").read() if os.path.exists(err) else p["error"]))
                 continue
             u = p["usage"]
-            s["input_tokens"] += sum(u.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
-            s["cost"] += p["cost"]
-            s["turns"] += p["turns"]
-            s["tool_result_tokens"] += sum(len(enc.encode(t)) for _, t in p["results"])
-            s["runs"].append(dict(run=os.path.basename(f)[:-6], tools=p["tools"], final=p["final"]))
+            one = dict(input_tokens=sum(u.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")),
+                       output_tokens=u.get("output_tokens", 0), cost=p["cost"], turns=p["turns"],
+                       tool_result_tokens=sum(count(t) for _, t in p["results"]))
+            for k in keys:
+                s[k] += one[k]
+                per[k].append(one[k])
+                by_q.setdefault(re.sub(r"-\d+$", "", run), {x: [] for x in keys})[k].append(one[k])
+            s["runs"].append(dict(run=run, tools=p["tools"], final=p["final"], **one))
         if s["runs"] or s["failed"]:
+            s["per_run"] = {k: stats(v) for k, v in per.items()}
+            s["by_question"] = {q: {k: stats(v) for k, v in m.items()} for q, m in sorted(by_q.items())}
             out[os.path.basename(d)] = s
     json.dump(out, open(f"{a.out}/summary.json", "w", encoding="utf-8"), indent=2, ensure_ascii=False)
-    print(json.dumps({k: {x: v[x] for x in v if x != "runs"} for k, v in out.items()}, indent=2))
+    print(json.dumps({k: {x: v[x] for x in v if x not in ("runs", "by_question")} for k, v in out.items()}, indent=2))
 
 
 if __name__ == "__main__":
@@ -171,5 +187,7 @@ if __name__ == "__main__":
     ap.add_argument("--prompt2", default="Look up {item} again with the tools, the data may have changed.", help="heal question for the resumed second run")
     ap.add_argument("--timeout", type=int, default=600)
     ap.add_argument("--claude-args", default="", help='extra flags for every claude call, one string: --claude-args "--setting-sources project"')
+    ap.add_argument("--counter", choices=["o200k", "claude"], default="o200k", help="summarize: how tool results are counted, see tokens.py")
+    ap.add_argument("--count-model", default="claude-opus-5-5", help="summarize: the model whose tokenizer --counter claude uses")
     a = ap.parse_args()
     globals()["cmd_" + a.cmd](a)

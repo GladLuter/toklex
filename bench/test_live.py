@@ -44,7 +44,7 @@ json.dump([{"id": "q1", "text": "About {item}", "checks": []}], open(qf, "w"))
 a = argparse.Namespace(out=d, server="srv", config=["a=a.json", "b=b.json", "a"], questions=qf, variant="a", runs=2, item="F",
                        item2="", model="m", mode="dense", first="a", second="b", prompt="Tell me about {item}",
                        prompt2="Look up {item} again, the data may have changed.", timeout=5,
-                       claude_args="--setting-sources project")
+                       claude_args="--setting-sources project", counter="o200k", count_model="claude-opus-5-5")
 live.cmd_run(a)
 assert len(calls) == 2 and os.path.exists(f"{d}/a/q1-2.jsonl")
 assert inputs[0] == "About F Use toklex_mode=dense in every tool call."  # on stdin, which also closes it
@@ -76,6 +76,10 @@ s = json.load(open(f"{d}/summary.json"))
 assert s["a"]["input_tokens"] == 2 * 3210 and s["a"]["turns"] == 6 and abs(s["a"]["cost"] - 0.0246) < 1e-9
 assert s["a"]["runs"][0]["tools"] == ["mcp__srv__toklex_schema", "mcp__srv__get_station"] and s["a"]["tool_result_tokens"] > 0
 assert s["a"]["failed"] == []
+assert s["a"]["output_tokens"] == 2 * 50 and s["a"]["per_run"]["cost"] == {"mean": 0.0123, "stdev": 0.0, "n": 2}, s["a"]["per_run"]
+assert list(s["a"]["by_question"]) == ["q1"] and s["a"]["by_question"]["q1"]["turns"]["n"] == 2
+assert s["a"]["runs"][0]["output_tokens"] == 50
+assert live.stats([1, 2, 3]) == {"mean": 2.0, "stdev": 1.0, "n": 3} and live.stats([]) == {"mean": 0.0, "stdev": 0.0, "n": 0}
 assert sorted(s) == ["a"], s  # heal/ and calibrate/ are scenarios, never variants
 print("ok flow")
 
