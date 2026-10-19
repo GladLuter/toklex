@@ -105,12 +105,28 @@ check('tool without schema or description still gets both', true,
     str_contains(json_encode($tx->withTools([['name' => 'x']])[0]), '"toklex_mode"'));
 
 $warnings = [];
-set_error_handler(function (int $no, string $msg) use (&$warnings) { $warnings[] = [$no, $msg]; return true; });
-$tx->withTools([['name' => 'get_station', 'description' => 'Get a station.']]);
+$collect = function (string $msg) use (&$warnings) { $warnings[] = $msg; };
+$tx->withTools([['name' => 'get_station', 'description' => 'Get a station.']], $collect);
 check('short description raises no warning', 0, count($warnings));
+$tx->withTools([['name' => 'big', 'description' => str_repeat('x', 2100)]], $collect);
+check('2100-char description gives one warning to the callback', [true], array_map(fn($w) => str_contains($w, "tool 'big' is over 2048"), $warnings));
+// without a callback a warning goes to error_log, never to stdout, which carries a stdio server's messages, and never through trigger_error
+$log = tempnam(sys_get_temp_dir(), 'tx');
+$prevLog = ini_set('error_log', $log);
+$raised = [];
+set_error_handler(function (int $no) use (&$raised) { $raised[] = $no; return true; });
+ob_start();
 $tx->withTools([['name' => 'big', 'description' => str_repeat('x', 2100)]]);
+$stdout = ob_get_clean();
 restore_error_handler();
-check('2100-char description raises one E_USER_WARNING', [E_USER_WARNING], array_column($warnings, 0));
+ini_set('error_log', $prevLog);
+check('the default warning goes to error_log only', ['', [], true], [$stdout, $raised, str_contains((string)file_get_contents($log), "tool 'big' is over 2048")]);
+unlink($log);
+$warnings = [];
+$os = $tx->withTools([['name' => 'a', 'inputSchema' => ['type' => 'object'], 'outputSchema' => ['type' => 'object']]], $collect);
+check('withTools removes outputSchema and says so', [false, 1], [isset($os[0]['outputSchema']), count($warnings)]);
+$obj = $tx->withTools([json_decode('{"name":"x","description":"d","inputSchema":{"type":"object","properties":{"q":{"type":"string"}}}}')]);
+check('a tool given as stdClass works like the array', json_encode($tx->withTools([json_decode('{"name":"x","description":"d","inputSchema":{"type":"object","properties":{"q":{"type":"string"}}}}', true)])), json_encode($obj));
 
 foreach (json_decode(file_get_contents("$fx/modes/args.json"), true) as $i => $c) {
     $args = $c['args'];
@@ -142,7 +158,13 @@ check('style defaults to plain', ['plain', 'plain'], [Toklex::fromFile("$fx/plai
 
 $txs = [];
 $caseFiles = glob("$fx/cases/*.json");
-check('the case glob finds every fixture', true, count($caseFiles) >= 30);
+$specText = file_get_contents(__DIR__ . '/../../spec/toklex.md');
+preg_match('/The folder `cases\/` holds (\d+) files: (\d+) coded cases .*? and (\d+) plain cases .*?The folder `invalid\/` holds (\d+) schemas\./s', $specText, $cnt);
+$coded = count(array_filter($caseFiles, fn($f) => (int)basename($f) < 40));
+check('the fixture folders hold what section 10 counts', [$cnt[1] ?? 0, $cnt[2] ?? 0, $cnt[3] ?? 0, $cnt[4] ?? 0],
+    [(string)count($caseFiles), (string)$coded, (string)(count($caseFiles) - $coded), (string)count(glob("$fx/invalid/*.json"))]);
+$readme = file_get_contents(__DIR__ . '/../../README.md');
+check('the README counts the same fixtures', true, str_contains($readme, "It has {$cnt[1]} encode and decode cases ({$cnt[2]} coded and {$cnt[3]} plain), {$cnt[4]} schemas"));
 foreach ($caseFiles as $f) {
     $name = basename($f, '.json');
     $c = json_decode(file_get_contents($f), true);
@@ -150,8 +172,8 @@ foreach ($caseFiles as $f) {
     $cv = $cx->version();
     $exp = str_replace('{v}', $cv, $c['expected']);
     $got = isset($c['error'])
-        ? $cx->error($c['error'], $c['mode'] ?? null)
-        : $cx->encode($c['tool'], $c['rows'], $c['meta'], $c['mode'] ?? null);
+        ? $cx->error($c['error'], $c['mode'] ?? null, $c['instructions'] ?? true)
+        : $cx->encode($c['tool'], $c['rows'], $c['meta'], $c['mode'] ?? null, $c['instructions'] ?? true);
     check("$name encode", $exp, $got);
     $d = $cx->decode($exp);
     check("$name decode schema", [json_decode(file_get_contents("$fx/{$c['schema']}"), true)['id'], $cv, $c['decoded_instructions'] ?? true], [$d['schema'], $d['version'], $d['instructions']]);
@@ -372,6 +394,48 @@ $mem = memory_get_peak_usage();
 $many = $tx->decode("$dh\n[100000]\nn:" . implode('|', array_fill(0, 3000, 'x*100000')));
 check('many max-length runs in one column stop at the record count', [100000, ['name' => 'x'], true], [count($many['rows']), ($many['rows'][99999] ?? []), memory_get_peak_usage() - $mem < 64_000_000]);
 check('runs past the record count are cut, not turned into extra records', 3, count($tx->decode("$dh\n[3]\nn:a*2|b*2|c")['rows']));
+$mem = memory_get_peak_usage();
+$wide = implode("\n", array_map(fn($i) => "c$i:x*100000", range(1, 200)));
+check('a short reply that expands past the cell limit is refused before it is built', [true, true],
+    [throwsInvalid(fn() => $tx->decode("$dh\n[100000]\n$wide")), memory_get_peak_usage() - $mem < 8_000_000]);
+check('the cell limit itself still decodes', 1000000, array_sum(array_map('count', $tx->decode("$dh\n[100000]\n" . implode("\n", array_map(fn($i) => "c$i:x*100000", range(1, 10))))['rows'])));
+
+// values that PHP keeps as objects travel as JSON would carry them (spec 11)
+enum TxLevel: string { case High = 'HIGH'; }
+enum TxPure { case North; }
+final class TxPoint implements JsonSerializable { public function __construct(private int $x) {} public function jsonSerialize(): mixed { return ['x' => $this->x]; } }
+final class TxRow { public string $id = 'a'; protected string $hidden = 'p'; private string $secret = 's'; }
+$utc = new DateTimeZone('UTC');
+check('an enum case is its value or its name', "$hd\nl|n\nh|North", $tx->encode('get_station', [['wind_level' => TxLevel::High, 'name' => TxPure::North]]));
+check('a date-time at midnight is the date alone and stays a date sequence', "$dh\n[3]\nt:2026-07-01+1d",
+    $tx->encode('station_history', array_map(fn($d) => ['date' => new DateTimeImmutable($d, $utc)], ['2026-07-01', '2026-07-02', '2026-07-03'])));
+check('any other date-time is ISO 8601 with the offset, and a fraction only when there is one',
+    "$hd\nk\n2026-07-01T10:30:00+02:00\n2026-07-01T10:30:00.250000+00:00",
+    $tx->encode('get_station', [['k' => new DateTime('2026-07-01 10:30:00', new DateTimeZone('+02:00'))], ['k' => new DateTimeImmutable('2026-07-01 10:30:00.25', $utc)]]));
+check('a JsonSerializable is what it returns, nested and as a record', ["$hd\nid|k.x\na|3", "$hd\nx\n5"],
+    [$tx->encode('get_station', [['station_id' => 'a', 'k' => new TxPoint(3)]]), $tx->encode('get_station', [new TxPoint(5)])]);
+check('an object keeps only its public properties', "$hd\nid\na", $tx->encode('get_station', [new TxRow()]));
+check('objects inside arrays, in the header and in off mode', ["$hd\nlb\n[\"HIGH\",\"2026-07-01\"]", "~tx@$v i:+ l:h", true],
+    [$tx->encode('get_station', [['labels' => [TxLevel::High, new DateTimeImmutable('2026-07-01', $utc)]]]), $tx->encode('get_station', [], ['wind_level' => TxLevel::High]),
+     str_contains($tx->encode('get_station', [['k' => TxLevel::High, 'p' => new TxPoint(1)]], [], 'off'), '"rows":[{"k":"HIGH","p":{"x":1}}]')]);
+
+// a record that is not a record, a broken off reply, the instruction flag
+foreach (['a string' => ['station_id' => 'a'], 'a number' => [1, 2], 'null' => [null], 'an enum' => [TxLevel::High]] as $what => $bad) {
+    check("encode refuses $what as a record, in every mode", [true, true], [throwsInvalid(fn() => $tx->encode('get_station', $bad)), throwsInvalid(fn() => $tx->encode('get_station', $bad, [], 'off'))]);
+}
+check('the record error names the fix', true, (function () use ($tx) {
+    try { $tx->encode('get_station', ['station_id' => 'a']); } catch (\InvalidArgumentException $e) { return str_contains($e->getMessage(), 'record 0 is string') && str_contains($e->getMessage(), '[$row]'); }
+    return false;
+})());
+check('decode refuses an off reply that is not JSON or has no schema', [true, true, true],
+    [throwsInvalid(fn() => $tx->decode('{not json')), throwsInvalid(fn() => $tx->decode('{"a":1}')), throwsInvalid(fn() => $tx->decode('{"schema":"x"}'))]);
+check('the instruction flag leaves the text out of coded off replies and keeps i:+', ["~tx@$v i:+ e:nf", false],
+    [$tx->error('nf', null, false), str_contains($tx->error('nf', 'off', false), 'instructions')]);
+check('a plain error without instructions starts with the header and reads back', ["~tp@{$tp->version()} error:boom", false, ['error' => 'boom']],
+    [$tp->error('boom', null, false), $tp->decode($tp->error('boom', null, false))['instructions'], $tp->decode($tp->error('boom', null, false))['meta']]);
+check('an escaped name never splits into two names in any mode', [['a|b' => 'x', 'my key' => 'y'], ['k:x y' => 'z']],
+    [$tp->decode($tp->encode('station_history', [['a|b' => 'x', 'my key' => 'y']]))['rows'][0], $tp->decode($tp->encode('get_station', [], ['k:x y' => 'z']))['meta']]);
+check('auto with no records is the header alone', $tp->encode('get_station', []), $tp->encode('station_log', []));
 
 $pt = $tp->withTools([['name' => 'get_station', 'description' => 'Get a station.', 'inputSchema' => ['type' => 'object', 'properties' => new stdClass()]]]);
 check('plain withTools adds no tools and no contract', [['get_station'], 'Get a station.'], [array_column($pt, 'name'), $pt[0]['description']]);

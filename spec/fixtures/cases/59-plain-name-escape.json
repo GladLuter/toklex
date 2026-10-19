@@ -1,0 +1,7 @@
+{
+  "schema": "plain.schema.json",
+  "tool": "get_station",
+  "rows": [{"station_id": "a", "a|b": 1, "rain_m": 0.0743, "z(÷5)": 3}, {"station_id": "b", "a|b": 2, "rain_m": 0.08, "z(÷5)": 4}],
+  "meta": {"my key": "v"},
+  "expected": "rule: Use only the fields in this reply.\nnotice: \"Line one.\\nLine two.\"\n~tp@{v} my\\u0020key:v\nstation_id|a\\u007cb|rain_m(÷10000)|z(\\u00f75)\na|1|743|3\nb|2|800|4"
+}

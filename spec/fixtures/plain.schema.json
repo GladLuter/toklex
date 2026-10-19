@@ -7,5 +7,6 @@
               "e": { "nf": "No station with that id." } },
   "scale": { "v": 10000, "u": 10000 },
   "instructions": { "rule": "Use only the fields in this reply.", "notice": "Line one.\nLine two." },
-  "dense": ["station_history"]
+  "dense": ["station_history"],
+  "auto": ["station_log"]
 }

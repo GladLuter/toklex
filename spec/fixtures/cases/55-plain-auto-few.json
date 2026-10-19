@@ -1,0 +1,7 @@
+{
+  "schema": "plain.schema.json",
+  "tool": "station_log",
+  "rows": [{"date": "2026-07-01", "wind_level": "MEDIUM"}, {"date": "2026-07-02", "wind_level": "MEDIUM"}, {"date": "2026-07-03", "wind_level": "MEDIUM"}, {"date": "2026-07-04", "wind_level": "MEDIUM"}, {"date": "2026-07-05", "wind_level": "HIGH"}, {"date": "2026-07-06", "wind_level": "HIGH"}, {"date": "2026-07-07", "wind_level": "HIGH"}, {"date": "2026-07-08", "wind_level": "LOW"}, {"date": "2026-07-09", "wind_level": "LOW"}],
+  "meta": {},
+  "expected": "rule: Use only the fields in this reply.\nnotice: \"Line one.\\nLine two.\"\n~tp@{v}\ndate|wind_level\n2026-07-01|MEDIUM\n2026-07-02|MEDIUM\n2026-07-03|MEDIUM\n2026-07-04|MEDIUM\n2026-07-05|HIGH\n2026-07-06|HIGH\n2026-07-07|HIGH\n2026-07-08|LOW\n2026-07-09|LOW"
+}

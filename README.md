@@ -338,7 +338,7 @@ The version is the first four hex characters of the SHA-256 of the file, with CR
 
 ## Porting to another language
 
-[spec/toklex.md](spec/toklex.md) is the protocol. Appendix A holds every text the model sees, byte for byte. [spec/fixtures/](spec/fixtures/) is the conformance suite. It has 47 encode and decode cases (33 coded and 14 plain), 22 schemas that must be rejected at load, a mode table and the version hash.
+[spec/toklex.md](spec/toklex.md) is the protocol. Appendix A holds every text the model sees, byte for byte. [spec/fixtures/](spec/fixtures/) is the conformance suite. It has 55 encode and decode cases (34 coded and 21 plain), 24 schemas that must be rejected at load, a mode table and the version hash.
 
 A port passes when it matches every fixture. For the PHP library:
 
