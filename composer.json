@@ -1,7 +1,17 @@
 {
     "name": "toklex/toklex",
     "description": "Compact MCP tool results with a schema the model reads.",
+    "type": "library",
+    "keywords": ["mcp", "llm", "tokens", "compression", "model-context-protocol"],
+    "homepage": "https://github.com/GladLuter/toklex",
     "license": "Apache-2.0",
+    "authors": [{"name": "Yevgenii Slieptsov", "homepage": "https://github.com/GladLuter"}],
+    "support": {"issues": "https://github.com/GladLuter/toklex/issues", "source": "https://github.com/GladLuter/toklex"},
     "require": {"php": ">=8.1"},
-    "autoload": {"classmap": ["php/src/Toklex.php"]}
+    "require-dev": {"phpstan/phpstan": "^2.1"},
+    "autoload": {"classmap": ["php/src/Toklex.php"]},
+    "scripts": {
+        "test": "php php/tests/run.php",
+        "analyse": "phpstan analyse --no-progress"
+    }
 }

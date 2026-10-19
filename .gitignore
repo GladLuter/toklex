@@ -2,3 +2,5 @@ bench/.venv/
 bench/out/
 bench/live/out/
 __pycache__/
+/vendor/
+composer.lock

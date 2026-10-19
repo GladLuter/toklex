@@ -1,1 +1,10 @@
 * text=auto eol=lf
+
+# kept out of the Composer package, which needs php/src and the spec
+/.github export-ignore
+/bench export-ignore
+/js export-ignore
+/php/tests export-ignore
+/phpstan.neon.dist export-ignore
+/python export-ignore
+/tests export-ignore
