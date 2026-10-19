@@ -1,0 +1,7 @@
+{
+  "schema": "test.schema.json",
+  "tool": "get_station",
+  "rows": [{"station_id": "a", "a|b": "x", "my key": "y", "c:d": "z", "back\\slash": "w", "[0]": "v", "z(÷5)": 3, "t\tab": "s", "l\nf": "r"}],
+  "meta": {"my key": "m", "k:x": "n"},
+  "expected": "~tx@{v} i:+ my\\u0020key:m k\\u003ax:n\nid|a\\u007cb|my key|c\\u003ad|back\\u005cslash|\\u005b0]|z(\\u00f75)|t\\u0009ab|l\\u000af\na|x|y|z|w|v|3|s|r"
+}

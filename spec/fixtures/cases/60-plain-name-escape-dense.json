@@ -1,0 +1,7 @@
+{
+  "schema": "plain.schema.json",
+  "tool": "station_history",
+  "rows": [{"a:b": 1, "x\ny": "p", "[2]": true}, {"a:b": 2, "x\ny": "p", "[2]": true}],
+  "meta": {},
+  "expected": "rule: Use only the fields in this reply.\nnotice: \"Line one.\\nLine two.\"\n~tp@{v}\n[2] One line per column: name:v1|v2|… x*K is x repeated K times, start+Nd is a date every N days, an empty cell is null.\na\\u003ab:1|2\nx\\u000ay:p*2\n\\u005b2]:true*2"
+}

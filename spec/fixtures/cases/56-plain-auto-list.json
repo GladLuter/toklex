@@ -1,0 +1,7 @@
+{
+  "schema": "plain.schema.json",
+  "tool": "station_log",
+  "rows": [{"station_id": "st-1", "wind_level": "MEDIUM"}, {"station_id": "st-2", "wind_level": "MEDIUM"}, {"station_id": "st-3", "wind_level": "MEDIUM"}, {"station_id": "st-4", "wind_level": "MEDIUM"}, {"station_id": "st-5", "wind_level": "HIGH"}, {"station_id": "st-6", "wind_level": "HIGH"}, {"station_id": "st-7", "wind_level": "HIGH"}, {"station_id": "st-8", "wind_level": "LOW"}, {"station_id": "st-9", "wind_level": "LOW"}, {"station_id": "st-10", "wind_level": "LOW"}, {"station_id": "st-11", "wind_level": "LOW"}, {"station_id": "st-12", "wind_level": "LOW"}],
+  "meta": {},
+  "expected": "rule: Use only the fields in this reply.\nnotice: \"Line one.\\nLine two.\"\n~tp@{v}\nstation_id|wind_level\nst-1|MEDIUM\nst-2|MEDIUM\nst-3|MEDIUM\nst-4|MEDIUM\nst-5|HIGH\nst-6|HIGH\nst-7|HIGH\nst-8|LOW\nst-9|LOW\nst-10|LOW\nst-11|LOW\nst-12|LOW"
+}

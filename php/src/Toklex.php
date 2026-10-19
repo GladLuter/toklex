@@ -40,6 +40,11 @@ Pick a mode for one call with the optional argument toklex_mode. The values are 
 TXT;
 
     private const MAX_RECORDS = 100000;
+    private const MAX_CELLS = 1000000;
+    private const AUTO_MIN = 10;
+    // characters that would break a column line or a header, written as \uXXXX (spec 6.1)
+    private const NAME_ESC = ['\\' => '\u005c', '|' => '\u007c', ':' => '\u003a', '÷' => '\u00f7',
+        "\t" => '\u0009', "\n" => '\u000a', "\v" => '\u000b', "\f" => '\u000c', "\r" => '\u000d'];
 
     // The calibration dataset and its key. They belong to the library and never depend on a server schema.
     private const CAL_SCHEMA = ['toklex' => 1, 'id' => 'cal', 'style' => 'coded', 'keys' => ['n' => 'name', 'd' => 'day', 't' => 'tier', 'p' => 'price'],
@@ -150,20 +155,31 @@ TXT;
         return implode("\n", $out);
     }
 
-    /** Adds toklex_mode to every tool. Coded style also adds the contract line and appends the two Toklex tools. */
-    public function withTools(array $tools): array
+    /**
+     * Adds toklex_mode to every tool and removes outputSchema. Coded style also adds the contract line and appends the two Toklex tools.
+     * $warn gets each warning as one line. Without it the warning goes to error_log: trigger_error would print to stdout in the CLI,
+     * which carries the messages of a stdio MCP server, and frameworks turn it into an exception.
+     */
+    public function withTools(array $tools, ?callable $warn = null): array
     {
+        $warn ??= error_log(...);
         $plain = $this->style() === 'plain';
         $contract = "Toklex reply ~{$this->s['id']}@{$this->v}. If this version is not in context, call toklex_schema first. Never guess a code.";
         foreach ($tools as &$t) {
+            $t = (array)$t;
             if (!$plain) {
                 $d = isset($t['description']) ? $t['description'] . "\n\n" . $contract : $contract;
                 if (preg_match_all('/./su', $d) > 2048) {
-                    trigger_error("Toklex: description of tool '{$t['name']}' is over 2048 characters, a client may cut the contract line", E_USER_WARNING);
+                    $warn("Toklex: description of tool '{$t['name']}' is over 2048 characters, a client may cut the contract line");
                 }
                 $t['description'] = $d;
             }
-            $in = $t['inputSchema'] ?? ['type' => 'object'];
+            // a tool with an outputSchema must return structuredContent, and a Toklex reply is one text block (spec 9)
+            if (isset($t['outputSchema'])) {
+                unset($t['outputSchema']);
+                $warn("Toklex: tool '{$t['name']}' loses its outputSchema, a Toklex reply carries no structuredContent");
+            }
+            $in = (array)($t['inputSchema'] ?? ['type' => 'object']);
             $in['properties'] = (array)($in['properties'] ?? []) + ['toklex_mode' => [
                 'type' => 'string',
                 'enum' => self::MODES,
@@ -206,37 +222,51 @@ TXT;
         return $this->defaultMode($tool);
     }
 
-    /** $mode null means the tool's default. */
-    public function encode(string $tool, array $rows, array $meta = [], ?string $mode = null): string
+    /**
+     * $mode null means the tool's default. $instructions false leaves the instruction text out of this reply, for a server
+     * that knows the model has read it earlier in the session (spec 5.1).
+     * @throws \InvalidArgumentException on a reserved meta key or a record that is not an array or an object
+     */
+    public function encode(string $tool, array $rows, array $meta = [], ?string $mode = null, bool $instructions = true): string
     {
-        $mode = in_array($mode, self::MODES, true) ? $mode : $this->defaultMode($tool);
+        $mode = in_array($mode, [...self::MODES, 'auto'], true) ? $mode : $this->defaultMode($tool);
         foreach ($meta as $k => $_) {
             $c = (string)($this->kf[$k] ?? self::u8((string)$k));
             in_array($c, $this->style() === 'plain' ? ['error'] : ['i', 'e'], true) && throw new \InvalidArgumentException("Toklex: meta key $c is reserved");
         }
-        if ($mode === 'off') {
-            return $this->off(['meta' => (object)$meta, 'rows' => array_map(fn($r) => (object)$r, array_values($rows))]);
+        $rows = array_map(self::val(...), array_values($rows));
+        foreach ($rows as $i => $r) {
+            is_array($r) || is_object($r) || throw new \InvalidArgumentException("Toklex: record $i is " . get_debug_type($r) . ', not a record. Pass a list of records, such as [$row] for one record.');
         }
-        $out = [$this->header($meta)];
+        if ($mode === 'off') {
+            return $this->off(['meta' => (object)$meta, 'rows' => array_map(fn($r) => (object)$r, $rows)], $instructions);
+        }
+        $out = [$this->header($meta, $instructions)];
         if (!$rows) {
             return $out[0];
         }
-        $flat = array_map(fn($r) => $this->flat($r), array_values($rows));
+        $flat = array_map(fn($r) => $this->flat($r), $rows);
         $cols = [];
         foreach ($flat as $f) {
             foreach ($f as $p => [$c]) {
                 $cols[$p] ??= $c;
             }
         }
+        $col = fn(string $p) => array_map(fn($f) => $f[$p][1] ?? null, $flat);
+        if ($mode === 'auto') {
+            // dense pays off on a long series of dates and costs more than safe on a short or wide list (spec 12.2)
+            $seq = count($flat) >= self::AUTO_MIN && array_filter(array_keys($cols), fn($p) => self::days($col((string)$p)) !== null);
+            $mode = $seq ? 'dense' : 'safe';
+        }
         if ($mode === 'dense') {
             $out[] = '[' . count($flat) . ']' . ($this->style() === 'plain' ? ' ' . self::DENSE_LINE : '');
             foreach ($cols as $p => $c) {
-                $v = array_map(fn($f) => $f[$p][1] ?? null, $flat);
-                $out[] = $this->label($p) . ':' . (self::days($v) ?? self::runs(array_map(fn($x) => $this->cell($x, $c), $v)));
+                $v = $col((string)$p);
+                $out[] = $this->label((string)$p, $c) . ':' . (self::days($v) ?? self::runs(array_map(fn($x) => $this->cell($x, $c), $v)));
             }
             return implode("\n", $out);
         }
-        $out[] = implode('|', array_map($this->label(...), array_keys($cols)));
+        $out[] = implode('|', array_map(fn($p) => $this->label((string)$p, $cols[$p]), array_keys($cols)));
         foreach ($flat as $f) {
             $cells = [];
             foreach ($cols as $p => $c) {
@@ -249,16 +279,16 @@ TXT;
     }
 
     /** $codeOrText is a code from values.e or its full message. An error has no records, so only off differs from a header line. */
-    public function error(string $codeOrText, ?string $mode = null): string
+    public function error(string $codeOrText, ?string $mode = null, bool $instructions = true): string
     {
         $e = $this->s['values']['e'] ?? [];
         $code = isset($e[$codeOrText]) ? $codeOrText : array_search($codeOrText, $e, true);
         $text = $code === false ? $codeOrText : $e[$code];
         if ($mode === 'off') {
-            return $this->off(['error' => $text]);
+            return $this->off(['error' => $text], $instructions);
         }
-        return $this->style() === 'plain' ? $this->header([]) . ' error:' . $this->cell($text, 'error', true)
-            : $this->header([]) . ' e:' . ($code === false ? self::quote($codeOrText) : $code);
+        return $this->style() === 'plain' ? $this->header([], $instructions) . ' error:' . $this->cell($text, 'error', true)
+            : $this->header([], $instructions) . ' e:' . ($code === false ? self::quote($codeOrText) : $code);
     }
 
     /** Reads a reply back with full key names and values. */
@@ -266,14 +296,17 @@ TXT;
     {
         if (str_starts_with($text, '{')) {
             $j = json_decode($text, true);
+            (is_array($j) && is_string($j['schema'] ?? null) && str_contains($j['schema'], '@'))
+                || throw new \InvalidArgumentException('Toklex: the off reply is not a JSON object with a schema');
             [$id, $ver] = explode('@', $j['schema'], 2);
             return ['schema' => $id, 'version' => $ver, 'instructions' => isset($j['instructions']),
-                'meta' => isset($j['error']) ? [$this->style() === 'plain' ? 'error' : 'e' => $j['error']] : $j['meta'], 'rows' => $j['rows'] ?? []];
+                'meta' => isset($j['error']) ? [$this->style() === 'plain' ? 'error' : 'e' => $j['error']] : (array)($j['meta'] ?? []), 'rows' => (array)($j['rows'] ?? [])];
         }
         $plain = $this->style() === 'plain';
-        $k = $this->inReply() ? count($this->s['instructions']) : 0;
+        // instruction lines start with their name, the header with ~, so a reply that left them out starts with the header
+        $k = $this->inReply() && !str_starts_with($text, '~') ? count($this->s['instructions']) : 0;
         $l = array_slice(explode("\n", $text), $k);
-        $un = fn(string $c) => $plain ? preg_replace('/\(÷\d+\)$/', '', $c) : $c;
+        $un = fn(string $c) => self::unname($plain ? preg_replace('/\(÷\d+\)$/', '', $c) : $c);
         preg_match('/^~([^@ ]+)@(\S+)/', $l[0] ?? '', $h) || throw new \InvalidArgumentException('Toklex: the reply has no header line');
         preg_match_all('/ ([^\s:]+):("(?:[^"\\\\]|\\\\.)*"|\S*)/', $l[0], $m, PREG_SET_ORDER);
         $ins = $k > 0;
@@ -291,6 +324,8 @@ TXT;
             if (preg_match('/^\[(\d+)\]( .*)?$/D', $l[1], $n)) {
                 $cols = [];
                 (int)$n[1] > self::MAX_RECORDS && throw new \InvalidArgumentException('Toklex: a reply of more than ' . self::MAX_RECORDS . ' records is refused');
+                // each column line expands to N cells, so a short forged reply could otherwise claim gigabytes
+                (int)$n[1] * (count($l) - 2) > self::MAX_CELLS && throw new \InvalidArgumentException('Toklex: a reply of more than ' . self::MAX_CELLS . ' cells is refused');
                 $grid = array_fill(0, (int)$n[1], []);
                 foreach (array_slice($l, 2) as $i => $line) {
                     [$cols[$i], $items] = explode(':', $line, 2) + [1 => ''];
@@ -305,7 +340,7 @@ TXT;
             foreach ($grid as $cells) {
                 $row = [];
                 foreach ($cols as $i => $col) {
-                    $segs = explode('.', $un($col));
+                    $segs = array_map(self::unname(...), explode('.', $plain ? preg_replace('/\(÷\d+\)$/', '', $col) : $col));
                     $val = $this->read($cells[$i] ?? '', end($segs));
                     $ref = &$row;
                     foreach ($segs as $sg) {
@@ -381,9 +416,10 @@ TXT;
         };
     }
 
+    /** dense, auto or safe. auto picks dense or safe when the records are known. */
     private function defaultMode(string $tool): string
     {
-        return in_array($tool, $this->s['dense'] ?? [], true) ? 'dense' : 'safe';
+        return in_array($tool, $this->s['dense'] ?? [], true) ? 'dense' : (in_array($tool, $this->s['auto'] ?? [], true) ? 'auto' : 'safe');
     }
 
     /** A dense column as one line of items. A run of equal cells is cell*K. */
@@ -436,18 +472,19 @@ TXT;
         return $o;
     }
 
-    private function header(array $meta): string
+    private function header(array $meta, bool $instructions = true): string
     {
         $ins = $this->s['instructions'] ?? [];
         $h = '';
-        foreach ($this->inReply() ? $ins : [] as $n => $b) {
+        foreach ($this->inReply() && $instructions ? $ins : [] as $n => $b) {
             $h .= "$n: " . (preg_match('/[\r\n]/', $b) ? self::quote($b) : $b) . "\n";
         }
         $h .= "~{$this->s['id']}@{$this->v}" . ($ins && $this->style() === 'coded' ? ' i:+' : '');
         foreach ($meta as $k => $v) {
             $c = (string)($this->kf[$k] ?? self::u8((string)$k));
+            $v = self::val($v);
             $t = is_array($v) || is_object($v) ? self::quote($this->js($v, true, $c)) : $this->cell($v, $c, true);
-            $t === '' || $h .= ' ' . $this->label($c, $c) . ":$t";
+            $t === '' || $h .= ' ' . $this->label(self::name($c, true), $c) . ":$t";
         }
         return $h;
     }
@@ -458,18 +495,31 @@ TXT;
         return $this->style() === 'plain' && ($this->s['instructions_at'] ?? 'reply') === 'reply' && ($this->s['instructions'] ?? []);
     }
 
-    /** The name a column or meta path is written under: the code path when coded, the full-name path plus (÷K) when plain and the scale key is scaled. The scale key is the last segment of a column path, and the whole key of a meta entry, as cell() reads it. */
-    private function label(string $path, ?string $key = null): string
+    /** The written path of a column or meta key, plus (÷K) when plain and $key is scaled. $key is the code of the last segment of a column path, or the whole key of a meta entry, as cell() reads it. */
+    private function label(string $path, string $key): string
     {
-        $m = $this->style() === 'plain' ? $this->sc[$key ?? substr(strrchr(".$path", '.'), 1)] ?? null : null;
+        $m = $this->style() === 'plain' ? $this->sc[$key] ?? null : null;
         return $m ? "$path(÷" . self::num($m, null) . ')' : $path;
     }
 
-    private function off(array $tail): string
+    /** A name as a column line writes it: each character that would break a line or a label as \uXXXX, and a leading [ too. $hdr also escapes a space, which ends a header key (spec 6.1). */
+    private static function name(string $n, bool $hdr = false): string
+    {
+        $n = strtr($n, $hdr ? self::NAME_ESC + [' ' => '\u0020'] : self::NAME_ESC);
+        return str_starts_with($n, '[') ? '\u005b' . substr($n, 1) : $n;
+    }
+
+    /** A written name back to the name. A written name holds no raw backslash, so every \uXXXX in it is an escape. */
+    private static function unname(string $n): string
+    {
+        return str_contains($n, '\u') ? preg_replace_callback('/\\\\u([0-9a-f]{4})/', fn($m) => json_decode('"\u' . $m[1] . '"') ?? $m[0], $n) : $n;
+    }
+
+    private function off(array $tail, bool $instructions = true): string
     {
         $ins = $this->s['instructions'] ?? [];
         return $this->js((object)(['toklex' => 'off', 'schema' => "{$this->s['id']}@{$this->v}"]
-            + ($ins && ($this->style() === 'coded' || $this->inReply()) ? ['instructions' => (object)$ins] : []) + $tail), false);
+            + ($ins && $instructions && ($this->style() === 'coded' || $this->inReply()) ? ['instructions' => (object)$ins] : []) + $tail), false);
     }
 
     /** One record as [dotted column => [code of the last segment, value]]. A non-empty object or map expands, anything else is a cell. */
@@ -478,7 +528,8 @@ TXT;
         $out = [];
         foreach ((array)$row as $k => $v) {
             $c = (string)($this->kf[$k] ?? self::u8((string)$k));
-            $p = $path === '' ? $c : "$path.$c";
+            $p = $path === '' ? self::name($c) : "$path." . self::name($c);
+            $v = self::val($v);
             $v = is_object($v) ? (array)$v : $v;
             if (is_array($v) && $v && !array_is_list($v)) {
                 $out += $this->flat($v, $p);
@@ -492,6 +543,7 @@ TXT;
     /** One cell. $hdr adds the header's two quote triggers, any whitespace and a double quote. */
     private function cell(mixed $v, string $c, bool $hdr = false): string
     {
+        $v = self::val($v);
         if ($v === null) {
             return '';
         }
@@ -522,6 +574,7 @@ TXT;
     /** JSON text. $coded shortens keys and codes strings and numbers by the key they sit under. Lists pass their key down. */
     private function js(mixed $x, bool $coded, ?string $k = null): string
     {
+        $x = self::val($x);
         if (is_array($x) || is_object($x)) {
             if (is_array($x) && array_is_list($x)) {
                 return '[' . implode(',', array_map(fn($e) => $this->js($e, $coded, $k), $x)) . ']';
@@ -589,6 +642,33 @@ TXT;
         }
         $t = ltrim(implode('', array_slice($r, 0, $n - strlen($f))), '0');
         return $t === '' ? '0' : ($x[0] === '-' ? "-$t" : $t);
+    }
+
+    /**
+     * A value as JSON would carry it (spec 11): a date-time as ISO 8601 text, an enum case by its value or name,
+     * a JsonSerializable by what it returns and any other object as a stdClass of its public properties.
+     */
+    private static function val(mixed $v): mixed
+    {
+        for ($i = 0; is_object($v) && !$v instanceof \stdClass && $i < 8; $i++) {
+            $v = match (true) {
+                $v instanceof \DateTimeInterface => self::iso($v),
+                $v instanceof \BackedEnum => $v->value,
+                $v instanceof \UnitEnum => $v->name,
+                $v instanceof \JsonSerializable => $v->jsonSerialize(),
+                default => (object)get_object_vars($v),
+            };
+        }
+        return is_object($v) && !$v instanceof \stdClass ? (object)get_object_vars($v) : $v;
+    }
+
+    /** The date alone at midnight, so that a date column stays a date sequence. Otherwise the time, a fraction when there is one, and the offset. */
+    private static function iso(\DateTimeInterface $d): string
+    {
+        if ($d->format('His.u') === '000000.000000') {
+            return $d->format('Y-m-d');
+        }
+        return $d->format('Y-m-d\TH:i:s' . ($d->format('u') === '000000' ? '' : '.u') . 'P');
     }
 
     /** The string with each invalid UTF-8 sequence replaced by U+FFFD, so that data never makes the encoder fail. */
@@ -694,8 +774,11 @@ TXT;
         (is_array($ins) && $ins === array_filter($ins, 'is_string')) || $fail('instructions must map names to strings');
         foreach ($plain ? array_keys($ins) : [] as $name) {
             self::badCode((string)$name) && $fail("instruction name $name is not a plain token$hint");
+            str_starts_with((string)$name, '~') && $fail("instruction name $name starts with ~, which marks the header");
         }
-        $dense = $s['dense'] ?? [];
-        (is_array($dense) && $dense === array_filter($dense, 'is_string')) || $fail('dense must be a list of tool names');
+        foreach (['dense', 'auto'] as $m) {
+            (is_array($s[$m] ?? []) && ($s[$m] ?? []) === array_filter($s[$m] ?? [], 'is_string')) || $fail("$m must be a list of tool names");
+        }
+        ($both = array_intersect($s['dense'] ?? [], $s['auto'] ?? [])) && $fail('tool ' . reset($both) . ' is in both dense and auto');
     }
 }

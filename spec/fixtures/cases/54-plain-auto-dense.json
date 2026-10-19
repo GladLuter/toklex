@@ -1,0 +1,7 @@
+{
+  "schema": "plain.schema.json",
+  "tool": "station_log",
+  "rows": [{"date": "2026-07-01", "wind_level": "MEDIUM", "rain_m": 0.07}, {"date": "2026-07-02", "wind_level": "MEDIUM", "rain_m": 0.071}, {"date": "2026-07-03", "wind_level": "MEDIUM", "rain_m": 0.072}, {"date": "2026-07-04", "wind_level": "MEDIUM", "rain_m": 0.073}, {"date": "2026-07-05", "wind_level": "HIGH", "rain_m": 0.074}, {"date": "2026-07-06", "wind_level": "HIGH", "rain_m": 0.075}, {"date": "2026-07-07", "wind_level": "HIGH", "rain_m": 0.076}, {"date": "2026-07-08", "wind_level": "LOW", "rain_m": 0.077}, {"date": "2026-07-09", "wind_level": "LOW", "rain_m": 0.078}, {"date": "2026-07-10", "wind_level": "LOW", "rain_m": 0.079}],
+  "meta": {},
+  "expected": "rule: Use only the fields in this reply.\nnotice: \"Line one.\\nLine two.\"\n~tp@{v}\n[10] One line per column: name:v1|v2|… x*K is x repeated K times, start+Nd is a date every N days, an empty cell is null.\ndate:2026-07-01+1d\nwind_level:MEDIUM*4|HIGH*3|LOW*3\nrain_m(÷10000):700|710|720|730|740|750|760|770|780|790"
+}

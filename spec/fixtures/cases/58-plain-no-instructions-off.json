@@ -1,0 +1,10 @@
+{
+  "schema": "plain.schema.json",
+  "tool": "get_station",
+  "mode": "off",
+  "instructions": false,
+  "rows": [{"station_id": "st-1", "rain_m": 0.0743}],
+  "meta": {},
+  "expected": "{\"toklex\":\"off\",\"schema\":\"tp@{v}\",\"meta\":{},\"rows\":[{\"station_id\":\"st-1\",\"rain_m\":0.0743}]}",
+  "decoded_instructions": false
+}

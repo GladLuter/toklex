@@ -1,0 +1,9 @@
+{
+  "schema": "plain.schema.json",
+  "tool": "get_station",
+  "instructions": false,
+  "rows": [{"station_id": "st-1", "rain_m": 0.0743}],
+  "meta": {"date": "2026-09-30"},
+  "expected": "~tp@{v} date:2026-09-30\nstation_id|rain_m(÷10000)\nst-1|743",
+  "decoded_instructions": false
+}
