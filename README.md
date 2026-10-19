@@ -6,7 +6,7 @@ The first version of Toklex used short codes for names and values. It is now cal
 
 Coded is still there. Put `"style": "coded"` in the schema and you get the v0.1 behaviour, with the `toklex_schema` tool, the contract line and `toklex_calibrate`.
 
-This repository holds the protocol ([spec/toklex.md](spec/toklex.md)), a PHP library, a conformance suite and an offline bench. Status is draft v0.2.
+This repository holds the protocol ([spec/toklex.md](spec/toklex.md)), a PHP library, ports to Python and TypeScript, a proxy that puts Toklex in front of any stdio MCP server, a conformance suite and an offline bench. Status is draft v0.3.
 
 ## Example
 
@@ -81,11 +81,11 @@ st-103|Bay Point|co|nb|h|1534|120|905
 | `dense` | One line per column, with runs (`MEDIUM*2`) and date sequences (`2026-07-01+1d`). | A long series of one record over dates, such as a history. |
 | `off` | Compact JSON with full names and the instructions. | The model misreads the table, or you need plain JSON. |
 
-A tool is safe by default. The schema lists the tools that are dense by default in `dense`.
+A tool is safe by default. The schema lists the tools that are dense by default in `dense`, and the tools that pick a mode per reply in `auto`. An auto tool answers dense when the reply has at least 10 records and a column of dates with a fixed step, and safe otherwise. That follows the production run of 2026-10-19 below: dense was the cheapest form of a 30-day history and cost more than safe on a short list.
 
 Dense makes the reply shorter, but the model has to put the rows back together from the columns, and that costs output tokens. Output costs more than input. On a short list with many columns dense can cost more than safe. Measure dense by what a session costs. The production run of 2026-10-19 below shows both cases.
 
-Every tool gets an optional argument `toklex_mode` with the values `off`, `safe` and `dense`. The library removes it before your tool runs.
+Every tool gets an optional argument `toklex_mode` with the values `off`, `safe` and `dense`. The library removes it before your tool runs. A caller cannot ask for `auto`. It is the server's choice.
 
 The style is a separate choice, made in the schema.
 
@@ -129,6 +129,8 @@ python bench/tokens.py
 ```
 
 `bench/tokens.py` needs `pip install -r bench/requirements.txt`. The example schema is plain, so this measures plain. To measure coded, copy the schema, add `"style": "coded"` and encode the copy.
+
+The numbers above count with o200k_base, which is OpenAI's tokenizer and runs offline. `python bench/tokens.py --counter claude` counts with the Anthropic `count_tokens` endpoint instead, so the table uses the tokenizer of the model that reads the replies. It needs `pip install anthropic` and an API key. `--model` picks the model, `claude-opus-5-5` by default. `bench/live.py summarize` takes the same `--counter`, and it reports the mean, the standard deviation and the number of runs per variant and per question, because three runs per question vary about as much as the variants differ.
 
 ### Production measurements
 
@@ -264,7 +266,9 @@ $rows = runMyTool($name, $args);   // a list of associative arrays
 return $tx->encode($name, $rows, ['date' => '2026-09-30'], $mode);
 ```
 
-Return each reply as one MCP `text` content block and add no `structuredContent`.
+Return each reply as one MCP `text` content block and add no `structuredContent`. `withTools` removes `outputSchema` from your tools for that reason, because MCP requires `structuredContent` from a tool that declares one. It accepts tools given as arrays or as `stdClass`. A warning goes to the callback you pass as the second argument, or to `error_log` without one. It never goes to stdout, which carries the messages of a stdio server.
+
+`encode` takes a list of records. One record goes in as `[$row]`. A record that is not an array or an object makes it throw `InvalidArgumentException` with that advice. Values that PHP keeps as objects go out as JSON would carry them: a `DateTimeInterface` as ISO 8601 text, the date alone when the time is midnight, a backed enum as its value, a pure enum as its name, a `JsonSerializable` as what it returns, and any other object as its public properties.
 
 Rows from PDO or another database driver can go in as they are. In a scaled field the library reads a number string such as `"0.092375"` as the number. A string with an exponent, such as `"4e-5"`, stays a quoted string and is not scaled. MySQL and MariaDB can send a `DOUBLE` column that way, so cast it to a number in your query code first.
 
@@ -281,10 +285,12 @@ return [
 
 Check this before you rely on it. As of October 2026 claude.ai, Claude Desktop and the API MCP connector do not pass `instructions` to the model. A safety rule placed there never reaches it. Claude Code passes the field but cuts it at 2048 characters, so a long rule would lose its end. With `instructions_at` set to `server` no reply carries the rules, `off` replies included.
 
+The rules cost tokens on every reply, 118 per reply on the production server below. A server that keeps state per MCP session can send them once: pass `false` as the fifth argument of `encode` (or the third of `error`) for every reply after the first one of the session. The reply then starts with the header. This has a risk. A client that compacts or trims its context can drop the first reply, and the rules with it. Leave the rules in when they matter for safety, and measure before you switch.
+
 Other methods:
 
 - `$tx->error('nf', $mode)` encodes an error. It takes a code from `values.e` or the full message.
-- `$tx->decode($reply)` reads a reply back into full names and values. Use it in tests.
+- `$tx->decode($reply)` reads a reply back into full names and values. Use it in tests. It refuses a dense reply of more than 100000 records or 1000000 cells, so a forged reply cannot exhaust memory.
 - `$tx->version()` returns the schema version.
 - `$tx->style()` returns `plain` or `coded`.
 - `$tx->resources()` and `$tx->readResource($uri)` serve the optional resources. A plain server has `toklex://modes`. A coded server also has `toklex://schema`.
@@ -306,6 +312,34 @@ switch ($name) {
 
 `withTools` warns when a tool description goes over 2048 characters, because some clients cut it there and the contract line sits at the end.
 
+## Python and TypeScript
+
+[python/](python/) and [js/](js/) are ports of the PHP library with the same rules, texts and method names (snake case in Python). Each passes the whole conformance suite. `tests/cross/fuzz.py` sends the same random records to all three libraries and checks that the replies are equal byte for byte and read back to the same rows. CI runs it on every pull request.
+
+```python
+from toklex import Toklex
+tx = Toklex.from_file("stations.schema.json")
+text = tx.encode(name, rows, {"date": "2026-09-30"}, tx.mode(name, args))
+```
+
+```ts
+import { Toklex } from 'toklex';
+const tx = Toklex.fromFile('stations.schema.json');
+const text = tx.encode(name, rows, { date: '2026-09-30' }, tx.mode(name, args));
+```
+
+The Python port needs Python 3.9 or newer, the TypeScript port Node 22.18 or newer. Neither has runtime dependencies. Each folder has a README with the details for its language.
+
+## Proxy
+
+`toklex-proxy`, from the Python package, puts Toklex in front of any stdio MCP server without a change to its code:
+
+```
+toklex-proxy --schema stations.schema.json -- php server.php
+```
+
+The proxy starts the server and relays every message. It adds `toklex_mode` to the tool list and removes `outputSchema`, removes `toklex_mode` from each call, and turns a result that holds records into one Toklex text block. A result holds records when its one text block, or its `structuredContent`, is a list of objects, an object with one member that is such a list (the other members go to the header), or a single object. Errors, free text and anything else pass unchanged. With a coded schema the proxy answers `toklex_schema` and `toklex_calibrate` itself. `--instructions once` sends the rules with the first reply of the session only, with the risk described above.
+
 ## Writing a schema
 
 A schema is one JSON file. `toklex` and `id` are required, the rest is optional.
@@ -317,7 +351,8 @@ A schema is one JSON file. `toklex` and `id` are required, the rest is optional.
   "values": { "e": { "nf": "No station with that id." } },
   "scale": { "rain_m": 10000 },
   "instructions": { "rule": "Use only the fields in this reply." },
-  "dense": ["station_history"]
+  "dense": ["station_history"],
+  "auto": ["station_log"]
 }
 ```
 
@@ -331,8 +366,11 @@ A schema is one JSON file. `toklex` and `id` are required, the rest is optional.
   Advice for a number that a person will read: a scaled field saves tokens, but the model may repeat the scale to the person it answers. In the production run, 2 of 9 plain answers showed the raw form, such as `1032 (÷10000 = 10.32%)`. In a later test, Claude Sonnet got the same table in two forms and wrote four answers for a user per form. With `snow_m(÷10000)` cells, all values were right and 3 of 4 answers explained the scaling ("divided by 10,000"). With the values in the user's unit (`snow_mm`, cell `80.1`), all values were right and none mentioned a conversion. The unit form cost 16% more tokens for that table, which had two scaled columns of five. So send such a number in the unit the person sees, rounded to the precision you publish. Put the unit in the field name (`rain_mm`, `share_pct`) and leave the field out of `scale`. Keep `scale` for numbers that the model uses but rarely quotes.
 - `instructions` holds named text blocks. In plain style each one is a line in front of the reply, or goes to the `instructions` field. In coded style all of them apply to a reply marked `i:+`.
 - `dense` lists the tools that answer in dense mode by default.
+- `auto` lists the tools that pick dense or safe for each reply, as described under Modes. A tool is in `dense` or in `auto`, not in both.
 
-The loader rejects codes that would be ambiguous in a cell, such as a code with a space, a `|` or a `*`, or one that looks like a number. A field name that is not in `keys` goes out as it is. In coded style, list any name that holds a `|`, a `:` or a space, so that a code goes out instead. In plain style the name itself is written, and such a name would break the table. A `|` breaks the column line, a `:` breaks a dense line, a space breaks a header key, and a dot reads back as a nested field. A name that holds `(÷` would be read as a scale label. The loader rejects all of these names in `keys`. Do not use them for a field that is not listed either.
+The loader rejects codes that would be ambiguous in a cell, such as a code with a space, a `|` or a `*`, or one that looks like a number. In plain style it also rejects names in `keys` that hold a `|`, a `:`, a space, a dot or `(÷`, and instruction names that start with `~`.
+
+A field name that is not in `keys` goes out as it is, apart from the characters that would break a line. The encoder writes a backslash, `|`, `:`, `÷`, a line break or a tab in a name as `\u` and four hex digits, such as `\u007c`, and a reader turns them back. A space stays as it is in a column name and is written `\u0020` in a header key. A dot still reads back as a nested field. Names from your own code rarely need this. It protects the table from names that come with the data.
 
 The version is the first four hex characters of the SHA-256 of the file, with CRLF turned into LF. Any edit changes it, a space included. In coded style a changed version makes the model fetch the schema again. A needless refetch costs a few tokens. An unnoticed change could make the model read codes wrongly. In plain style the version only names the schema in the header.
 
@@ -340,13 +378,15 @@ The version is the first four hex characters of the SHA-256 of the file, with CR
 
 [spec/toklex.md](spec/toklex.md) is the protocol. Appendix A holds every text the model sees, byte for byte. [spec/fixtures/](spec/fixtures/) is the conformance suite. It has 55 encode and decode cases (34 coded and 21 plain), 24 schemas that must be rejected at load, a mode table and the version hash.
 
-A port passes when it matches every fixture. For the PHP library:
+A port passes when it matches every fixture. The Python and TypeScript ports in this repository are examples. For the three libraries:
 
 ```
 php php/tests/run.php
+python python/tests/run.py
+node js/test/run.ts
 ```
 
-The runner prints `OK <n> checks` and exits with 0, or lists the failures and exits with 1. It also compares the library output with Appendix A.
+Each runner prints `OK <n> checks` and exits with 0, or lists the failures and exits with 1. It also compares the library output with Appendix A. `python tests/cross/fuzz.py` then compares the three libraries on random data. A new port can join it with a small encode script like `tests/cross/encode.php`.
 
 ## Licence and citation
 
