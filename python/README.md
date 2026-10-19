@@ -24,12 +24,27 @@ Values that JSON has no type for are turned into what JSON would carry: a `datet
 
 ## Proxy
 
-`python -m toklex.proxy` puts Toklex in front of any stdio MCP server without changing its code. See the main README.
+`toklex-proxy` (or `python -m toklex.proxy`) puts Toklex in front of any stdio MCP server without changing its code.
+
+```
+toklex-proxy --schema stations.schema.json -- php server.php
+```
+
+It relays every message and changes four things. The tool list gets `toklex_mode` on every tool and loses `outputSchema`. A call loses `toklex_mode` before the server sees it. A result whose one text block or `structuredContent` holds records becomes one Toklex text block: a list of objects, an object with one member that is such a list (the other members go to the header), or a single object. Errors, free text and anything else pass unchanged. With a coded schema the proxy answers `toklex_schema` and `toklex_calibrate` itself, and with any schema it serves `toklex://modes`.
+
+`--instructions once` sends the instruction text with the first reply of the session only (spec 5.1). It saves tokens on every later reply, but a client that compacts its context can lose the rules, so leave it off when the rules matter for safety.
+
+In an MCP client config, the proxy is the command and the server follows `--`:
+
+```json
+{"mcpServers": {"stations": {"command": "toklex-proxy", "args": ["--schema", "/srv/stations.schema.json", "--", "php", "/srv/server.php"]}}}
+```
 
 ## Tests
 
 ```
 python python/tests/run.py
+python python/tests/test_proxy.py
 ```
 
 The runner prints `OK <n> checks` and exits with 0, or lists the failures and exits with 1.

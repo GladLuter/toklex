@@ -18,5 +18,8 @@ Homepage = "https://github.com/GladLuter/toklex"
 Source = "https://github.com/GladLuter/toklex"
 Issues = "https://github.com/GladLuter/toklex/issues"
 
+[project.scripts]
+toklex-proxy = "toklex.proxy:main"
+
 [tool.setuptools]
 packages = ["toklex"]
