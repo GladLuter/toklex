@@ -43,12 +43,14 @@ qf = os.path.join(d, "q.json")
 json.dump([{"id": "q1", "text": "About {item}", "checks": []}], open(qf, "w"))
 a = argparse.Namespace(out=d, server="srv", config=["a=a.json", "b=b.json", "a"], questions=qf, variant="a", runs=2, item="F",
                        item2="", model="m", mode="dense", first="a", second="b", prompt="Tell me about {item}",
-                       prompt2="Look up {item} again, the data may have changed.", timeout=5)
+                       prompt2="Look up {item} again, the data may have changed.", timeout=5,
+                       claude_args="--setting-sources project")
 live.cmd_run(a)
 assert len(calls) == 2 and os.path.exists(f"{d}/a/q1-2.jsonl")
 assert inputs[0] == "About F Use toklex_mode=dense in every tool call."  # on stdin, which also closes it
 assert "-p" in calls[0] and not any("About" in c for c in calls[0])  # never on the command line a .cmd shim would requote
 assert calls[0][calls[0].index("--mcp-config") + 1] == "a.json" and "--strict-mcp-config" in calls[0]
+assert calls[0][-2:] == ["--setting-sources", "project"]  # --claude-args reaches every call, split like a shell would
 calls.clear(); live.cmd_heal(a)
 assert "--resume" not in calls[0] and calls[1][calls[1].index("--resume") + 1] == "sess-123" and calls[1][calls[1].index("--mcp-config") + 1] == "b.json"
 h = json.load(open(f"{d}/heal/heal.json"))

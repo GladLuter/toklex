@@ -2,7 +2,7 @@
 # Generic live-run harness: drives `claude -p` against any MCP server for A/B runs between reply modes,
 # schema self-healing checks and the calibration scenario. Knows nothing about a particular site.
 # Usage: python live.py {run|heal|calibrate|summarize} --out DIR --server NAME --config V=FILE ... (see --help)
-import argparse, glob, json, os, re, shutil, subprocess, sys
+import argparse, glob, json, os, re, shlex, shutil, subprocess, sys
 
 
 def parse(path):
@@ -55,6 +55,7 @@ def claude(a, prompt, cfg, path, resume=None):
            "--verbose", "--mcp-config", cfg, "--strict-mcp-config", "--allowedTools", f"mcp__{a.server}"]
     if resume:
         cmd += ["--resume", resume]
+    cmd += shlex.split(a.claude_args)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     err = ""
     with open(path, "w", encoding="utf-8") as f:
@@ -169,5 +170,6 @@ if __name__ == "__main__":
     ap.add_argument("--prompt", default="Tell me about {item} using the available tools.", help="heal question for the first run")
     ap.add_argument("--prompt2", default="Look up {item} again with the tools, the data may have changed.", help="heal question for the resumed second run")
     ap.add_argument("--timeout", type=int, default=600)
+    ap.add_argument("--claude-args", default="", help='extra flags for every claude call, one string: --claude-args "--setting-sources project"')
     a = ap.parse_args()
     globals()["cmd_" + a.cmd](a)
