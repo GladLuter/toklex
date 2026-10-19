@@ -78,10 +78,12 @@ st-103|Bay Point|co|nb|h|1534|120|905
 | Mode | What the reply is | Use it when |
 |---|---|---|
 | `safe` | A table. One line per record. | The default for most tools. |
-| `dense` | One line per column, with runs (`MEDIUM*2`) and date sequences (`2026-07-01+1d`). | Long result sets with repeated values and dates. |
+| `dense` | One line per column, with runs (`MEDIUM*2`) and date sequences (`2026-07-01+1d`). | A long series of one record over dates, such as a history. |
 | `off` | Compact JSON with full names and the instructions. | The model misreads the table, or you need plain JSON. |
 
 A tool is safe by default. The schema lists the tools that are dense by default in `dense`.
+
+Dense makes the reply shorter, but the model has to put the rows back together from the columns, and that costs output tokens. Output costs more than input. On a short list with many columns dense can cost more than safe. Measure dense by what a session costs. The production run of 2026-10-19 below shows both cases.
 
 Every tool gets an optional argument `toklex_mode` with the values `off`, `safe` and `dense`. The library removes it before your tool runs.
 
@@ -161,7 +163,7 @@ Plain sessions, 2026-10-11, 3 questions with 3 runs each, average per question:
 | Cost | $0.168 | $0.160 (-5%) |
 | Tool-result tokens | 2521 | 1153 (-54%) |
 
-There were no schema calls. Dense in this run has no result, because one question lost two runs to a usage limit.
+There were no schema calls. Dense in this run has no result, because one question lost two runs to a usage limit. The run of 2026-10-19 below has it.
 
 Reading: no misread numbers in the plain answers. In 2 of 9 answers the model showed the raw form to the user, such as `1032 (÷10000 = 10.32%)`. The value is right and the label leaked into the answer. The advice under `scale` in "Writing a schema" is about this. The follow-up run below had no leak.
 
@@ -194,6 +196,34 @@ There were no schema calls. The model showed the raw form to the user in 0 of 9 
 Cost falls while input does not because almost all input is the repeated context, read from the prompt cache. A shorter tool reply mostly saves cache writes, and a cache write costs 12.5 times a cache read. So the saving shows in cost and in cache writes, and not in total input tokens.
 
 The cache-write drop (6.4 thousand per question) is larger than the reply drop (1.5 thousand), so part of it is noise from which sessions hit a warm cache. Across the two plain runs, cost was 5% and 14% below JSON. The direction held and the size is not settled. Turns and input were 2-3% above JSON in this run and below it in the previous one, which is within the spread.
+
+The run of 2026-10-19 measured dense, with the same server, library and questions. Each question ran 3 times per variant. In the dense variant every question asked for `toklex_mode=dense` in every call (`--mode dense`), so dense was used on every tool, the list included. The sessions ran with `--claude-args "--setting-sources project"`, which leaves out the tester's plugins and hooks. The context per turn fell to about 45,000 tokens, so the absolute numbers here are lower than above and cannot be compared with them.
+
+The server allows 120 requests an hour, so the run went in three phases an hour apart. The first session of each phase wrote a cold cache and cost about twice as much as the others. Plain and dense each had one such session, JSON had none. The table gives the cost twice: over all sessions, and over the warm ones only.
+
+| | JSON | plain safe | plain dense |
+|---|---|---|---|
+| Turns | 4.56 | 4.89 (+7%) | 4.67 (+2%) |
+| Cost, all sessions | $0.091 | $0.103 (+13%) | $0.109 (+20%) |
+| Cost, warm cache | $0.091 | $0.086 (-5%) | $0.092 (+1%) |
+| Tool-result tokens | 2890 | 1304 (-55%) | 1150 (-60%) |
+| Output tokens | 939 | 953 | 1717 (+83%) |
+
+Output tokens per session, by question:
+
+| | JSON | plain safe | plain dense |
+|---|---|---|---|
+| A list of 13 records, five columns | 884 | 892 | 2297 |
+| A 30-day history of one record | 1055 | 1068 | 1697 |
+| A comparison of two records | 879 | 899 | 1158 |
+
+The answers to the user were the same length in all variants. The extra output in dense is the model's own work: it rebuilds 13 rows from five column lines and expands runs like `MEDIUM*2`. On the history the extra output is smaller, and the question took one turn fewer in dense (4.00 against 4.67 in safe), so dense was the cheapest variant there. On the list dense cost more than safe. Three sessions per question is a small sample, so read this as a direction.
+
+Reading: all values in all answers matched the server. Dense notation (`[N]`, `x*K`, `start+Nd`) never reached an answer. One plain answer showed the schema version to the user.
+
+Plain on a warm cache cost 5% less than JSON. Across the three plain runs that is 5%, 14% and 5%. Plain took more turns than JSON on the comparison question (7.00 against 5.67).
+
+The same run tested coded once more. The description of `toklex_schema` said that the schema was already loaded, with the schema text after it. The model stopped calling `toklex_schema`: 0 of 9 sessions, down from 6 of 9. But Claude Code loads an MCP tool's description only when the model fetches the tool with `ToolSearch`, and the model fetched `toklex_schema` that way in 9 of 9 sessions. The extra turn changed form and stayed. Coded took 5.33 turns per question with the new description, 5.67 without it, and plain took 4.89. A client that puts all tool descriptions in context from the first turn should lose the extra turn. This harness cannot measure such a client.
 
 ## What it costs
 
