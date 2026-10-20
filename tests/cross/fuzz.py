@@ -11,11 +11,18 @@ from toklex import Toklex, ToklexError  # noqa: E402
 ATOMS = ["", "a", "m", "MEDIUM", "HIGH", "x y", "a|b", "5*star", '"q', "[x]", "{", "true", "null", "12", "0.5", "1e3", "007",
          "Line1\nLine2", "tab\tx", "Côte", "a/b", "2026-07-03+1d", "2026-07-01", "\\", "u\\u007c", "ü÷", " lead", "-0", "0", " "]
 NAMES = ["station_id", "name", "wind_level", "rain_m", "snow_m", "date", "user", "login", "labels", "a.b", "k", "x y", "a|b",
-         "c:d", "[1]", "z(÷5)", "n", "e", "i", "t\tx", "back\\slash"]
-NUMS = [0, 1, -1, 5.0, 0.0743, 0.00015, -0.00015, 1.5e-7, 1e20, 12345678.9, 0.1, 2 ** 40, -3.25, 0.0001499999999999999, 1e15, 123456789012.5]
+         "c:d", "[1]", "z(÷5)", "n", "e", "i", "t\tx", "back\\slash", "0", "1", "10"]
+NUMS = [0, 1, -1, 5.0, 0.0743, 0.00015, -0.00015, 1.5e-7, 1e20, 12345678.9, 0.1, 2 ** 40, -3.25, 0.0001499999999999999, 1e15, 123456789012.5,
+        2 ** 53 + 1, -(2 ** 60)]
 
 
 def same(a, b):
+    """Equal as PHP arrays: a map with the keys 0, 1, ... in order is that list, and numbers differ by less than 1e-9."""
+    listlike = lambda x: isinstance(x, dict) and all(k == str(i) for i, k in enumerate(x))  # noqa: E731
+    if isinstance(a, list) and listlike(b):
+        b = list(b.values())
+    if isinstance(b, list) and listlike(a):
+        a = list(a.values())
     if isinstance(a, (dict, list)) and isinstance(b, (dict, list)) and not a and not b:
         return True
     if isinstance(a, dict) and isinstance(b, dict):
@@ -42,8 +49,11 @@ def cases(seed, count):
     out = []
     for _ in range(count):
         rows = [{rnd.choice(NAMES): val(rnd) for _ in range(rnd.randint(0, 5))} for _ in range(rnd.randint(0, 6))]
-        if rnd.random() < .3:  # a series, so dense and auto meet date sequences
-            rows = [{"date": "2026-07-%02d" % (i + 1), "rain_m": rnd.choice([0.07, 0.08]), "wind_level": rnd.choice(["HIGH", "LOW"])} for i in range(rnd.randint(1, 12))]
+        if rnd.random() < .3:  # a series, so dense and auto meet date sequences, also across the leap day of year 0000
+            start = rnd.choice(["2026-07-%02d", "0000-02-%02d"])
+            rows = [{"date": start % (i + 20), "rain_m": rnd.choice([0.07, 0.08]), "wind_level": rnd.choice(["HIGH", "LOW"])} for i in range(rnd.randint(1, 10))]
+        if rnd.random() < .1:  # a record whose nested map has the keys 0, 1, ... and is a list to PHP
+            rows.append({"station_id": "s", "a": {str(i): val(rnd) for i in range(rnd.randint(1, 3))}})
         meta = {rnd.choice(NAMES + ["my key"]): rnd.choice(NUMS + ATOMS) for _ in range(rnd.randint(0, 3))}
         out.append({"schema": rnd.choice(["test.schema.json", "plain.schema.json", "plain-server.schema.json"]),
                     "tool": rnd.choice(["get_station", "station_history", "station_log"]),
@@ -80,6 +90,7 @@ if __name__ == "__main__":
             if r[0] != ref[0] or not same(ref[1], r[1]):
                 bad += 1
                 if bad <= 3:
-                    print(f"MISMATCH {lang} case {i}: {json.dumps(c, ensure_ascii=False)[:300]}\n  php: {json.dumps(ref, ensure_ascii=False)[:300]}\n  {lang}: {json.dumps(r, ensure_ascii=False)[:300]}")
+                    part = "reply" if r[0] != ref[0] else "rows read back"
+                    print(f"MISMATCH {lang} case {i} in the {part}: {json.dumps(c, ensure_ascii=False)[:300]}\n  php: {json.dumps(ref, ensure_ascii=False)[:600]}\n  {lang}: {json.dumps(r, ensure_ascii=False)[:600]}")
     print(f"seed {seed}: {len(cs)} cases, {bad} mismatches")
     sys.exit(1 if bad else 0)

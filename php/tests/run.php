@@ -393,12 +393,60 @@ check('one record over the limit is rejected', true, throwsInvalid(fn() => $tx->
 $mem = memory_get_peak_usage();
 $many = $tx->decode("$dh\n[100000]\nn:" . implode('|', array_fill(0, 3000, 'x*100000')));
 check('many max-length runs in one column stop at the record count', [100000, ['name' => 'x'], true], [count($many['rows']), ($many['rows'][99999] ?? []), memory_get_peak_usage() - $mem < 64_000_000]);
+unset($many, $big);
 check('runs past the record count are cut, not turned into extra records', 3, count($tx->decode("$dh\n[3]\nn:a*2|b*2|c")['rows']));
 $mem = memory_get_peak_usage();
 $wide = implode("\n", array_map(fn($i) => "c$i:x*100000", range(1, 200)));
 check('a short reply that expands past the cell limit is refused before it is built', [true, true],
     [throwsInvalid(fn() => $tx->decode("$dh\n[100000]\n$wide")), memory_get_peak_usage() - $mem < 8_000_000]);
-check('the cell limit itself still decodes', 1000000, array_sum(array_map('count', $tx->decode("$dh\n[100000]\n" . implode("\n", array_map(fn($i) => "c$i:x*100000", range(1, 10))))['rows'])));
+
+// review 2026-10-19, item 1: the cost of a reply bounds memory and time inside PHP's default memory_limit of 128M (spec 11)
+$cost = function (callable $f): array { // [rows or 'refused', MB above the start, seconds]
+    gc_collect_cycles();
+    function_exists('memory_reset_peak_usage') && memory_reset_peak_usage();
+    [$m, $t] = [memory_get_usage(), microtime(true)];
+    try {
+        $r = count($f()['rows']);
+    } catch (\InvalidArgumentException) {
+        $r = 'refused';
+    }
+    return [$r, (memory_get_peak_usage() - $m) / 1048576, microtime(true) - $t];
+};
+$cols = fn(int $n, int $k, string $cell = 'x') => "$dh\n[$n]\n" . implode("\n", array_map(fn($i) => "c$i:$cell*$n", range(1, $k)));
+[$r, $mb] = $cost(fn() => $tx->decode($cols(100000, 5)));
+check('a reply at the cost limit decodes inside 80 MB', [100000, true], [$r, $mb < 80]);
+check('one more column than the cost limit is refused', 'refused', $cost(fn() => $tx->decode($cols(100000, 6)))[0]);
+[$r, $mb] = $cost(fn() => $tx->decode("$dh\n[100000]\n" . implode('.', array_fill(0, 10, 'a')) . ':x*100000'));
+check('a nested column costs its depth, so 46 bytes of a.a.a... no longer take 400 MB', ['refused', true], [$r, $mb < 8]);
+[$r, $mb] = $cost(fn() => $tx->decode("$dh\n" . implode('.', array_fill(0, 1000, 'a')) . "\n" . implode("\n", array_fill(0, 2000, '1'))));
+check('a safe reply with a column path of 1000 names is refused at once', ['refused', true], [$r, $mb < 8]);
+check('a column path of 64 names decodes and one of 65 is refused', [1, 'refused'],
+    [$cost(fn() => $tx->decode("$dh\n" . implode('.', array_fill(0, 64, 'a')) . "\n1"))[0], $cost(fn() => $tx->decode("$dh\n" . implode('.', array_fill(0, 65, 'a')) . "\n1"))[0]]);
+$safe = fn(int $n, int $k) => "$dh\n" . implode('|', array_map(fn($i) => "c$i", range(1, $k))) . "\n" . implode("\n", array_fill(0, $n, implode('|', array_fill(0, $k, '1'))));
+check('safe mode has the same cost limit', [100000, 'refused'], [$cost(fn() => $tx->decode($safe(100000, 5)))[0], $cost(fn() => $tx->decode($safe(100000, 6)))[0]]);
+[$r, $mb, $s] = $cost(fn() => $tx->decode("$dh\n[10000]\na:[" . implode(',', range(1, 3000)) . ']*10000'));
+check('a run of a long JSON array is refused before it is decoded 10000 times', ['refused', true, true], [$r, $mb < 8, $s < 1]);
+check('each [ or { in a JSON array cell costs 8', [7000, 'refused'],
+    [$cost(fn() => $tx->decode("$dh\n[7000]\na:" . str_repeat('[', 8) . str_repeat(']', 8) . '*7000'))[0], $cost(fn() => $tx->decode("$dh\n[8000]\na:" . str_repeat('[', 8) . str_repeat(']', 8) . '*8000'))[0]]);
+[$r, $mb] = $cost(fn() => $tx->decode("$dh\n[100000]\n" . implode("\n", array_map(fn($i) => "d$i:2026-01-01+1d", range(1, 5)))));
+check('five date sequences of 100000 dates decode inside 96 MB', [100000, true], [$r, $mb < 96]);
+check('a JSON array cell nested 64 levels is read, 65 levels stay text', [true, true],
+    [is_array($tx->decode("$dh\nlb\n" . str_repeat('[', 64) . str_repeat(']', 64))['rows'][0]['labels']), is_string($tx->decode("$dh\nlb\n" . str_repeat('[', 65) . str_repeat(']', 65))['rows'][0]['labels'])]);
+
+// review 2026-10-19, item 4: a forged date sequence is refused with InvalidArgumentException, and the calendar holds at year 0000
+foreach (['2026-13-45+1d', '2026-02-30+1d', '2026-01-01+99999999999999999999d', '9999-12-30+1d'] as $seq) {
+    check("the date sequence $seq is refused as a reply", true, throwsInvalid(fn() => $tx->decode("$dh\n[3]\nt:$seq")));
+}
+check('a date sequence that ends on 9999-12-31 reads back', ['9999-12-30', '9999-12-31'], array_column($tx->decode("$dh\n[2]\nt:9999-12-30+1d")['rows'], 'date'));
+check('a leap day of year 0000 is a date sequence both ways', ["$dh\n[3]\nt:0000-02-27+1d", ['0000-02-27', '0000-02-28', '0000-02-29']],
+    [$dense($days(['0000-02-27', '0000-02-28', '0000-02-29'])), array_column($tx->decode("$dh\n[3]\nt:0000-02-27+1d")['rows'], 'date')]);
+check('a date sequence crosses from year 0000 into 0001', ['0000-12-31', '0001-01-01', '0001-01-02'], array_column($tx->decode("$dh\n[3]\nt:0000-12-31+1d")['rows'], 'date'));
+
+// review 2026-10-19, item 12: no pattern takes \s or \d from the locale, where a single-byte locale counts NBSP as space
+$src = file_get_contents(__DIR__ . '/../src/Toklex.php');
+$loose = array_filter(explode("\n", $src), fn($line) => str_contains($line, "'/") && preg_match('/\\\\[sSdDwW]/', $line));
+check('every pattern names its characters', [], array_values($loose));
+check('a meta key with NBSP reads back whole', ["k\u{a0}x" => 'v'], $tp->decode($tp->encode('get_station', [], ["k\u{a0}x" => 'v']))['meta']);
 
 // values that PHP keeps as objects travel as JSON would carry them (spec 11)
 enum TxLevel: string { case High = 'HIGH'; }
@@ -415,6 +463,28 @@ check('any other date-time is ISO 8601 with the offset, and a fraction only when
 check('a JsonSerializable is what it returns, nested and as a record', ["$hd\nid|k.x\na|3", "$hd\nx\n5"],
     [$tx->encode('get_station', [['station_id' => 'a', 'k' => new TxPoint(3)]]), $tx->encode('get_station', [new TxPoint(5)])]);
 check('an object keeps only its public properties', "$hd\nid\na", $tx->encode('get_station', [new TxRow()]));
+
+// review 2026-10-19, item 11: no value loses data in silence or makes the encoder fail
+final class TxText implements Stringable { public function __toString(): string { return 'as text'; } }
+final class TxChain implements JsonSerializable { public function __construct(private int $n) {} public function jsonSerialize(): mixed { return $this->n ? new TxChain($this->n - 1) : 'end'; } }
+check('an ArrayObject is its array, a Stringable its text and a closure null', "$hd\nao.k|ao.0|s|f\n1|2|as text",
+    $tx->encode('get_station', [['ao' => new ArrayObject(['k' => 1, 2]), 's' => new TxText(), 'f' => fn() => 1]]));
+check('a JsonSerializable chain of 8 steps is followed and a longer one is null', ["$hd\nc\nend", "$hd\nc\n|"],
+    [$tx->encode('get_station', [['c' => new TxChain(7)]]), $tx->encode('get_station', [['c' => new TxChain(8)]])]);
+$loop = new stdClass();
+$loop->id = 'a';
+$loop->me = $loop;
+check('an object that holds itself is null where it repeats, in every mode', ["$hd\nid|me\na", true],
+    [$tx->encode('get_station', [$loop]), str_contains($tx->encode('get_station', [$loop], [], 'off'), '"rows":[{"id":"a","me":null}]')]);
+$deep = 'x';
+for ($i = 0; $i < 70; $i++) {
+    $deep = ['k' => $deep];
+}
+$col = explode("\n", $tx->encode('get_station', [['d' => $deep]]))[1];
+check('a map nested past 64 levels stops there, and the reply reads back', [63, true],
+    [substr_count($col, '.'), $tx->decode($tx->encode('get_station', [['d' => $deep]]))['rows'] !== []]);
+$withNull = $tx->withTools([['name' => 'a', 'outputSchema' => null], ['description' => 'no name']], fn() => null);
+check('withTools removes an outputSchema that is null and takes a tool without a name', [false, false], [array_key_exists('outputSchema', $withNull[0]), isset($withNull[1]['outputSchema'])]);
 check('objects inside arrays, in the header and in off mode', ["$hd\nlb\n[\"HIGH\",\"2026-07-01\"]", "~tx@$v i:+ l:h", true],
     [$tx->encode('get_station', [['labels' => [TxLevel::High, new DateTimeImmutable('2026-07-01', $utc)]]]), $tx->encode('get_station', [], ['wind_level' => TxLevel::High]),
      str_contains($tx->encode('get_station', [['k' => TxLevel::High, 'p' => new TxPoint(1)]], [], 'off'), '"rows":[{"k":"HIGH","p":{"x":1}}]')]);

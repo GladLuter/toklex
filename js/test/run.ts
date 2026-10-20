@@ -11,6 +11,7 @@ const FX = join(ROOT, 'spec', 'fixtures');
 let n = 0;
 const fails: string[] = [];
 type O = Record<string, unknown>;
+const own = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
 
 /** Strict equality, except that two numbers are equal when they differ by less than 1e-9, and an empty object equals an empty list as PHP arrays do. */
 function same(a: unknown, b: unknown): boolean {
@@ -27,7 +28,8 @@ function same(a: unknown, b: unknown): boolean {
 
 function check(name: string, expected: unknown, actual: unknown): void {
   n++;
-  if (!same(expected, actual)) fails.push(`FAIL ${name}\n  expected: ${JSON.stringify(expected)}\n  actual:   ${JSON.stringify(actual)}`);
+  const show = (x: unknown) => JSON.stringify(x, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v));
+  if (!same(expected, actual)) fails.push(`FAIL ${name}\n  expected: ${show(expected)}\n  actual:   ${show(actual)}`);
 }
 
 function raises(f: () => unknown): boolean {
@@ -127,7 +129,51 @@ check('a date sequence reads back as N dates', ['2026-07-01', '2026-07-08', '202
 check('a run longer than the record count is cut at N', [{ name: 'x' }, { name: 'x' }], tx.decode(`${hd}\n[2]\nn:x*9`).rows);
 const wide = (k: number) => Array.from({ length: k }, (_, i) => `c${i}:x*100000`).join('\n');
 check('a forged record or cell count is refused', [true, true], [raises(() => tx.decode(`${hd}\n[100001]\nn:x`)), raises(() => tx.decode(`${hd}\n[100000]\n${wide(200)}`))]);
-check('the cell limit itself still decodes', 100000, tx.decode(`${hd}\n[100000]\n${wide(10)}`).rows.length);
+const rows = (text: string): number | string => {
+  try {
+    return tx.decode(text).rows.length;
+  } catch (e) {
+    if (e instanceof ToklexError) return 'refused';
+    throw e;
+  }
+};
+const times = (s: string, k: number) => Array(k).fill(s);
+
+// review 2026-10-19, item 1: the cost of a reply bounds memory and time (spec 11)
+check('a reply at the cost limit decodes and one more column is refused', [100000, 'refused'], [rows(`${hd}\n[100000]\n${wide(5)}`), rows(`${hd}\n[100000]\n${wide(6)}`)]);
+check('a nested column costs its depth', 'refused', rows(`${hd}\n[100000]\n${times('a', 10).join('.')}:x*100000`));
+check('a column path of 64 names decodes, 65 or 1000 are refused', [1, 'refused', 'refused'],
+  [rows(`${hd}\n${times('a', 64).join('.')}\n1`), rows(`${hd}\n${times('a', 65).join('.')}\n1`), rows(`${hd}\n${times('a', 1000).join('.')}\n${times('1', 2000).join('\n')}`)]);
+const safe = (n: number, k: number) => `${hd}\n${Array.from({ length: k }, (_, i) => `c${i}`).join('|')}\n${times(times('1', k).join('|'), n).join('\n')}`;
+check('safe mode has the same cost limit', [100000, 'refused'], [rows(safe(100000, 5)), rows(safe(100000, 6))]);
+const t1 = Date.now();
+check('a run of a long JSON array is refused before it is decoded', ['refused', true], [rows(`${hd}\n[10000]\na:[${Array.from({ length: 3000 }, (_, i) => i).join(',')}]*10000`), Date.now() - t1 < 1000]);
+check('each [ or { in a JSON array cell costs 8', [7000, 'refused'], [rows(`${hd}\n[7000]\na:${'['.repeat(8)}${']'.repeat(8)}*7000`), rows(`${hd}\n[8000]\na:${'['.repeat(8)}${']'.repeat(8)}*8000`)]);
+const shared = tx.decode(`${hd}\n[2]\nlb:[1]*2`).rows as O[];
+check('rows of a run never share a list', false, shared[0].labels === shared[1].labels);
+check('a JSON array cell nested 64 levels is read, 65 levels stay text', [true, 'string'],
+  [Array.isArray((tx.decode(`${hd}\nlb\n${'['.repeat(64)}${']'.repeat(64)}`).rows[0] as O).labels), typeof (tx.decode(`${hd}\nlb\n${'['.repeat(65)}${']'.repeat(65)}`).rows[0] as O).labels]);
+
+// review 2026-10-19, item 4 and item 3c: forged date sequences are refused, the calendar holds at year 0000
+for (const seq of ['2026-13-45+1d', '2026-02-30+1d', '2026-01-01+99999999999999999999d', '9999-12-30+1d']) {
+  check(`the date sequence ${seq} is refused as a reply`, 'refused', rows(`${hd}\n[3]\nt:${seq}`));
+}
+const dates = (text: string) => (tx.decode(text).rows as O[]).map((r) => r.date);
+check('a date sequence that ends on 9999-12-31 reads back', ['9999-12-30', '9999-12-31'], dates(`${hd}\n[2]\nt:9999-12-30+1d`));
+check('a leap day of year 0000 is a date sequence both ways', [`${hd}\n[3]\nt:0000-02-27+1d`, ['0000-02-27', '0000-02-28', '0000-02-29']],
+  [tx.encode('station_history', ['0000-02-27', '0000-02-28', '0000-02-29'].map((date) => ({ date }))), dates(`${hd}\n[3]\nt:0000-02-27+1d`)]);
+check('a date sequence crosses from year 0000 into 0001', ['0000-12-31', '0001-01-01', '0001-01-02'], dates(`${hd}\n[3]\nt:0000-12-31+1d`));
+
+// review 2026-10-19, item 3: key order, big integers, dates outside 0000-9999
+check('a plain object puts integer-like keys first, a Map keeps its order as PHP does', [`${hd}\n0|1|b|a\n4|2|1|3`, `${hd}\nb|1|a|0\n1|2|3|4`],
+  [tx.encode('get_station', [{ b: 1, '1': 2, a: 3, '0': 4 }]), tx.encode('get_station', [new Map<string, unknown>([['b', 1], ['1', 2], ['a', 3], ['0', 4]])])]);
+check('a Map keeps its order in the header and in off mode too', [`${hd} b:1 1:2`, true],
+  [tx.encode('get_station', [], new Map<string, unknown>([['b', 1], ['1', 2]])), tx.encode('get_station', [new Map<string, unknown>([['b', 1], ['1', 2]])], {}, 'off').includes('"rows":[{"b":1,"1":2}]')]);
+check('an integer above 2^53 reads back as a bigint with every digit', [9007199254740993n, [9007199254740993n, 1]],
+  [(tx.decode(`${hd}\nk\n9007199254740993`).rows[0] as O).k, (tx.decode(`${hd}\nlb\n[9007199254740993,1]`).rows[0] as O).labels]);
+check('a bigint is written with every digit', `${hd}\nk\n9007199254740993`, tx.encode('get_station', [{ k: 9007199254740993n }]));
+check('a Date outside 0000-9999 keeps its year', [`${hd}\nk\n10000-01-01`, `${hd}\nk\n-0001-03-01`],
+  [tx.encode('get_station', [{ k: new Date(Date.UTC(10000, 0, 1)) }]), tx.encode('get_station', [{ k: new Date(Date.UTC(-1, 2, 1)) }])]);
 check('an escaped name never splits into two names in any mode', [{ 'a|b': 'x', 'my key': 'y' }, { 'k:x y': 'z' }],
   [tp.decode(tp.encode('station_history', [{ 'a|b': 'x', 'my key': 'y' }])).rows[0], tp.decode(tp.encode('get_station', [], { 'k:x y': 'z' })).meta]);
 
@@ -149,6 +195,27 @@ check('any other Date is ISO 8601 with +00:00, and a fraction only when there is
 check('toJSON, a class instance, a Map, a Set and a bigint travel as JSON would carry them', `${hd}\nid|k.x|m.a|s|big\na|3|1|[1,2]|12345678901234567890`,
   tx.encode('get_station', [{ station_id: 'a', k: new Point(3), m: new Map([['a', 1]]), s: new Set([1, 2]), big: 12345678901234567890n }]));
 check('undefined is absent, as JSON.stringify leaves it out', `${hd}\nid\na`, tx.encode('get_station', [{ station_id: 'a', gone: undefined }]));
+
+// review 2026-10-19, items 11 and 14: no value loses data in silence or makes the encoder fail, and the ports agree
+const loop: O = { id: 'a' };
+loop.me = loop;
+check('an object that holds itself is null where it repeats, in every mode', [`${hd}\nid|me\na`, true],
+  [tx.encode('get_station', [loop]), tx.encode('get_station', [loop], {}, 'off').includes('"rows":[{"id":"a","me":null}]')]);
+let deep: unknown = 'x';
+for (let i = 0; i < 70; i++) deep = { k: deep };
+check('a map nested past 64 levels stops there, and the reply reads back', [63, true],
+  [tx.encode('get_station', [{ d: deep }]).split('\n')[1].split('.').length - 1, tx.decode(tx.encode('get_station', [{ d: deep }])).rows.length === 1]);
+const chain = (n: number): unknown => ({ toJSON: () => (n ? chain(n - 1) : 'end') });
+check('a toJSON chain of 8 steps is followed and a longer one is null', [`${hd}\nc\nend`, `${hd}\nc\n|`],
+  [tx.encode('get_station', [{ c: chain(7) }]), tx.encode('get_station', [{ c: chain(8) }])]);
+check('a map with the keys 0, 1 in order is a list as in PHP, other maps stay maps', [`${hd}\nid|a\nx|[1,2]`, `${hd}\nid|a.1|a.0\nx|1|2`],
+  [tx.encode('get_station', [{ station_id: 'x', a: new Map([['0', 1], ['1', 2]]) }]), tx.encode('get_station', [{ station_id: 'x', a: new Map([['1', 1], ['0', 2]]) }])]);
+check('a JSON object cell with the keys 0, 1 stays an object, as JSON.parse loses their order', [{ 0: 1, 1: 2 }], (tx.decode(`${hd}\nlb\n[{"0":1,"1":2}]`).rows[0] as O).labels);
+const proto = tx.decode(`${hd}\n__proto__.x|a\n1|2`).rows[0] as O;
+check('a column named __proto__ is an own key and leaves the prototype alone', [true, true], [own(proto, '__proto__'), Object.getPrototypeOf(proto) === Object.prototype]);
+check('an inputSchema {} stays without a type, as in PHP', { properties: { toklex_mode: { type: 'string', enum: ['off', 'safe', 'dense'], description: 'Reply format: off, safe or dense.' } } },
+  tx.withTools([{ name: 'a', inputSchema: {} }], () => {})[0].inputSchema);
+check('an outputSchema that is null is removed', false, 'outputSchema' in tx.withTools([{ name: 'a', outputSchema: null }], () => {})[0]);
 check('encode refuses a record that is not an object, in every mode', [true, true, true],
   [raises(() => tx.encode('get_station', ['x'])), raises(() => tx.encode('get_station', [1], {}, 'off')), raises(() => tx.encode('get_station', [null]))]);
 check('decode refuses an off reply that is not JSON or has no schema', [true, true], [raises(() => tx.decode('{not json')), raises(() => tx.decode('{"a":1}'))]);
