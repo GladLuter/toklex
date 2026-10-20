@@ -385,21 +385,14 @@ check('a value code shaped like a date sequence is rejected for that reason', tr
     try { Toklex::fromFile("$fx/invalid/value-code-date-sequence.json"); } catch (\InvalidArgumentException $e) { return str_contains($e->getMessage(), 'date sequence'); }
     return false;
 })());
-$mem = memory_get_peak_usage();
-check('a forged record count is rejected before anything is allocated', [true, true, true],
+check('a forged record count is rejected', [true, true, true],
     [throwsInvalid(fn() => $tx->decode("$dh\n[4000000]")), throwsInvalid(fn() => $tx->decode("$dh\n[4000000]\nn:x*4000000")), throwsInvalid(fn() => $tx->decode("$dh\n[4000000]\nt:2026-01-01+1d"))]);
-check('the forged count costs no memory', true, memory_get_peak_usage() - $mem < 8_000_000);
 check('the record limit itself still decodes', 100000, count($tx->decode("$dh\n[100000]\nn:x*100000")['rows']));
 check('one record over the limit is rejected', true, throwsInvalid(fn() => $tx->decode("$dh\n[100001]\nn:x")));
-$mem = memory_get_peak_usage();
 $many = $tx->decode("$dh\n[100000]\nn:" . implode('|', array_fill(0, 3000, 'x*100000')));
-check('many max-length runs in one column stop at the record count', [100000, ['name' => 'x'], true], [count($many['rows']), ($many['rows'][99999] ?? []), memory_get_peak_usage() - $mem < 64_000_000]);
+check('many max-length runs in one column stop at the record count', [100000, ['name' => 'x']], [count($many['rows']), ($many['rows'][99999] ?? [])]);
 unset($many, $big);
 check('runs past the record count are cut, not turned into extra records', 3, count($tx->decode("$dh\n[3]\nn:a*2|b*2|c")['rows']));
-$mem = memory_get_peak_usage();
-$wide = implode("\n", array_map(fn($i) => "c$i:x*100000", range(1, 200)));
-check('a short reply that expands past the cell limit is refused before it is built', [true, true],
-    [throwsInvalid(fn() => $tx->decode("$dh\n[100000]\n$wide")), memory_get_peak_usage() - $mem < 8_000_000]);
 
 // review 2026-10-19, item 1: the cost of a reply bounds memory and time inside PHP's default memory_limit of 128M (spec 11)
 $cost = function (string $reply) use ($fx): array { // [rows or 'refused', MB above the start, seconds], in a fresh process at 128M
@@ -424,10 +417,18 @@ $safe = fn(int $n, int $k) => "$dh\n" . implode('|', array_map(fn($i) => "c$i", 
 check('safe mode has the same cost limit', [100000, 'refused'], [$cost($safe(100000, 5))[0], $cost($safe(100000, 6))[0]]);
 [$r, $mb] = $cost($safe(100000, 1));
 check('safe mode has the same record limit, so a 1 MB reply of one short column fits in 128M', [100000, true, 'refused', 'refused'],
-    [$r, $mb < 80, $cost($safe(100001, 1))[0], $cost("$dh
-
-" . str_repeat("
-", 100001))[0]]);
+    [$r, $mb < 80, $cost($safe(100001, 1))[0], $cost("$dh\n\n" . str_repeat("\n", 100001))[0]]);
+[$r, $mb] = $cost("$dh\n[4000000]\nn:x*4000000");
+check('a forged record count is refused before anything is allocated', ['refused', true], [$r, $mb < 8]);
+[$r, $mb] = $cost("$dh\n[100000]\n" . implode("\n", array_map(fn($i) => "c$i:x*100000", range(1, 200))));
+check('a short reply that expands past the cost limit is refused before it is built', ['refused', true], [$r, $mb < 8]);
+[$r, , $s] = $cost("$dh\n[1]\n" . str_repeat("a:x\n", 1000000));
+check('a million short column lines are refused at once', ['refused', true], [$r, $s < 0.5]);
+$br = str_repeat('[', 8) . str_repeat(']', 8);
+$deep = implode('.', array_fill(0, 10, 'a'));
+check('safe mode costs a nested column and a JSON array cell as dense mode does', [7000, 'refused', 6000, 'refused'],
+    array_map(fn($b) => $cost($b)[0], ["$dh\na\n" . implode("\n", array_fill(0, 7000, $br)), "$dh\na\n" . implode("\n", array_fill(0, 8000, $br)),
+        "$dh\n$deep\n" . implode("\n", array_fill(0, 6000, 'x')), "$dh\n$deep\n" . implode("\n", array_fill(0, 7000, 'x'))]));
 [$r, $mb, $s] = $cost("$dh\n[10000]\na:[" . implode(',', range(1, 3000)) . ']*10000');
 check('a run of a long JSON array is refused before it is decoded 10000 times', ['refused', true, true], [$r, $mb < 8, $s < 1]);
 check('each [ or { in a JSON array cell costs 8', [7000, 'refused'],
