@@ -2,7 +2,7 @@
 # Generic live-run harness: drives `claude -p` against any MCP server for A/B runs between reply modes,
 # schema self-healing checks and the calibration scenario. Knows nothing about a particular site.
 # Usage: python live.py {run|heal|calibrate|summarize} --out DIR --server NAME --config V=FILE ... (see --help)
-import argparse, glob, json, os, re, shlex, shutil, subprocess, sys
+import argparse, glob, json, os, re, shlex, shutil, subprocess
 
 
 def parse(path):
@@ -130,10 +130,11 @@ def cmd_calibrate(a):
 
 
 def stats(xs):
-    """Mean, sample standard deviation and count. A small sample varies a lot, so a table shows the spread too."""
-    m = sum(xs) / len(xs) if xs else 0.0
-    sd = (sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) ** .5 if len(xs) > 1 else 0.0
-    return dict(mean=round(m, 6), stdev=round(sd, 6), n=len(xs))
+    """Mean, sample standard deviation and count. A small sample varies a lot, so a table shows the spread too.
+    One run gives no spread, so its stdev is None, and no run gives no mean either."""
+    m = sum(xs) / len(xs) if xs else None
+    sd = (sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) ** .5 if len(xs) > 1 else None
+    return dict(mean=None if m is None else round(m, 6), stdev=None if sd is None else round(sd, 6), n=len(xs))
 
 
 def cmd_summarize(a):
@@ -163,11 +164,12 @@ def cmd_summarize(a):
                 by_q.setdefault(re.sub(r"-\d+$", "", run), {x: [] for x in keys})[k].append(one[k])
             s["runs"].append(dict(run=run, tools=p["tools"], final=p["final"], **one))
         if s["runs"] or s["failed"]:
-            s["per_run"] = {k: stats(v) for k, v in per.items()}
+            # the runs of a variant ask different questions, so their spread mixes the questions with run noise: mean only
+            s["per_run"] = {k: {x: y for x, y in stats(v).items() if x != "stdev"} for k, v in per.items()}
             s["by_question"] = {q: {k: stats(v) for k, v in m.items()} for q, m in sorted(by_q.items())}
             out[os.path.basename(d)] = s
     json.dump(out, open(f"{a.out}/summary.json", "w", encoding="utf-8"), indent=2, ensure_ascii=False)
-    print(json.dumps({k: {x: v[x] for x in v if x not in ("runs", "by_question")} for k, v in out.items()}, indent=2))
+    print(json.dumps({k: {x: v[x] for x in v if x != "runs"} for k, v in out.items()}, indent=2))
 
 
 if __name__ == "__main__":

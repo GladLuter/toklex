@@ -30,7 +30,7 @@ assert live.recommended([("mcp__srv__get_station", "x")]) is None
 print("ok")
 
 # Command flow with subprocess.run replaced by a copy of the sample: the real claude CLI is never started.
-import argparse, json, shutil, subprocess, tempfile
+import argparse, contextlib, io, shutil, subprocess
 calls, inputs = [], []
 def fake_run(cmd, stdout, **kw):
     calls.append(cmd)
@@ -71,15 +71,20 @@ except SystemExit as e:
     assert "--variant" in str(e), e
 a.config = ["a=a.json", "b=b.json", "a"]; live.cmd_calibrate(a)  # bare "a" in --config names the variant; sample holds no toklex_calibrate result
 assert json.load(open(f"{d}/calibrate/calibrate.json"))["recommended"] is None
-live.cmd_summarize(a)
+shown = io.StringIO()
+with contextlib.redirect_stdout(shown):
+    live.cmd_summarize(a)
 s = json.load(open(f"{d}/summary.json"))
+assert json.loads(shown.getvalue())["a"]["by_question"] == s["a"]["by_question"], "stdout shows the spread per question too"
 assert s["a"]["input_tokens"] == 2 * 3210 and s["a"]["turns"] == 6 and abs(s["a"]["cost"] - 0.0246) < 1e-9
 assert s["a"]["runs"][0]["tools"] == ["mcp__srv__toklex_schema", "mcp__srv__get_station"] and s["a"]["tool_result_tokens"] > 0
 assert s["a"]["failed"] == []
-assert s["a"]["output_tokens"] == 2 * 50 and s["a"]["per_run"]["cost"] == {"mean": 0.0123, "stdev": 0.0, "n": 2}, s["a"]["per_run"]
-assert list(s["a"]["by_question"]) == ["q1"] and s["a"]["by_question"]["q1"]["turns"]["n"] == 2
+assert s["a"]["output_tokens"] == 2 * 50 and s["a"]["per_run"]["cost"] == {"mean": 0.0123, "n": 2}, s["a"]["per_run"]
+assert list(s["a"]["by_question"]) == ["q1"] and s["a"]["by_question"]["q1"]["cost"] == {"mean": 0.0123, "stdev": 0.0, "n": 2}
 assert s["a"]["runs"][0]["output_tokens"] == 50
-assert live.stats([1, 2, 3]) == {"mean": 2.0, "stdev": 1.0, "n": 3} and live.stats([]) == {"mean": 0.0, "stdev": 0.0, "n": 0}
+assert live.stats([1, 2, 3]) == {"mean": 2.0, "stdev": 1.0, "n": 3}
+assert live.stats([5]) == {"mean": 5.0, "stdev": None, "n": 1}, "one run gives no spread"
+assert live.stats([]) == {"mean": None, "stdev": None, "n": 0}
 assert sorted(s) == ["a"], s  # heal/ and calibrate/ are scenarios, never variants
 print("ok flow")
 
