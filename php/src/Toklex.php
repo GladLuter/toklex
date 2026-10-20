@@ -150,11 +150,9 @@ TXT;
         if ($d = $s['dense'] ?? []) {
             $out[] = 'Dense tools: ' . implode(', ', $d);
         }
-        if ($ins = $s['instructions'] ?? []) {
+        if ($s['instructions'] ?? []) {
             $out[] = 'Instructions (they apply to every response marked i:+):';
-            foreach ($ins as $name => $body) {
-                $out[] = "$name: $body";
-            }
+            $out[] = $this->instructionsText();
         }
         return implode("\n", $out);
     }
