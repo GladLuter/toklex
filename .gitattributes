@@ -8,3 +8,4 @@
 /phpstan.neon.dist export-ignore
 /python export-ignore
 /tests export-ignore
+/.superpowers export-ignore
