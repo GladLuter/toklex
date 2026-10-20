@@ -20,9 +20,12 @@ Return `text` as one MCP `text` content block and add no `structuredContent`.
 
 The methods have the PHP names: `error`, `decode`, `version`, `style`, `instructionsText`, `schemaText`, `calibrate`, `resources` and `readResource`. `encode` and `error` take `instructions = false` to leave the instruction text out of a reply the model has read before (spec 5.1). `withTools` takes a `warn` callback, and without it warnings go to `console.error`, which is stderr and safe for a stdio server. `Toklex.fromText(text)` loads a schema from a string.
 
-Values travel as `JSON.stringify` would carry them: a `Date` is ISO 8601 text in UTC (the date alone at midnight UTC), an object with `toJSON` is what that returns, a `Map` is an object, a `Set` is an array, a class instance is its own enumerable properties, and `undefined` is left out. A `bigint` is written with all its digits.
+Values travel as `JSON.stringify` would carry them: a `Date` is ISO 8601 text in UTC (the date alone at midnight UTC), an object with `toJSON` is what that returns, a `Map` is a map with its keys in their order, a `Set` is an array, a class instance is its own enumerable properties, and `undefined` is left out. A `bigint` is written with all its digits.
 
-Two limits come from JavaScript itself. A number is a double, so an integer above 2^53 has lost digits before the library sees it. Pass it as a `bigint` or a string. And an object puts keys that look like array indexes, such as `"0"`, before the other keys, so such columns come first.
+Two limits come from JavaScript itself.
+
+- A number is a double, so an integer above 2^53 has lost digits before the library sees it. Pass it as a `bigint` or a string. `decode` returns a `bigint` for an integer cell outside the safe range, so it keeps every digit.
+- An object puts keys that look like array indexes, such as `"0"`, before its other keys. Pass a record or the metadata as a `Map` when such names must keep their place. The reply then has the bytes of the PHP library. `decode` returns plain objects, so there such keys come first. For the same reason it reads a JSON map with the keys `"0"`, `"1"` and so on as a map, where PHP and Python read a list.
 
 ## Tests
 
