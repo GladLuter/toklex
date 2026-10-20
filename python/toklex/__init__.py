@@ -54,9 +54,9 @@ _MAX_DEPTH = 64
 _LAST_DAY = 2932896  # 9999-12-31 as days since 1970-01-01
 _AUTO_MIN = 10
 # characters that would break a column line or a header, written as \uXXXX (spec 6.1)
-_NAME_ESC = {"\\": "\\u005c", "|": "\\u007c", ":": "\\u003a", "÷": "\\u00f7",
-             "\t": "\\u0009", "\n": "\\u000a", "\v": "\\u000b", "\f": "\\u000c", "\r": "\\u000d"}
-_NAME_ESC_HDR = dict(_NAME_ESC, **{" ": "\\u0020"})
+_NAME_ESC = str.maketrans({"\\": "\\u005c", "|": "\\u007c", ":": "\\u003a", "÷": "\\u00f7",
+                           "\t": "\\u0009", "\n": "\\u000a", "\v": "\\u000b", "\f": "\\u000c", "\r": "\\u000d"})
+_NAME_ESC_HDR = {**_NAME_ESC, ord(" "): "\\u0020"}
 _UNNAME = re.compile(r"\\u([0-9a-f]{4})")
 
 # The calibration dataset and its key. They belong to the library and never depend on a server schema.
@@ -148,7 +148,9 @@ def _is_num(x: Any) -> bool:
 
 def _u8(s: str) -> str:
     """The string with each lone surrogate replaced by U+FFFD, the counterpart of invalid UTF-8 in PHP."""
-    if any("\ud800" <= ch <= "\udfff" for ch in s):
+    try:
+        s.encode()
+    except UnicodeEncodeError:
         return s.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
     return s
 
@@ -268,7 +270,7 @@ def _quote(s: str) -> str:
 def _name(n: str, hdr: bool = False) -> str:
     """A name as a column line writes it (spec 6.1). hdr also escapes a space, which ends a header key."""
     esc = _NAME_ESC_HDR if hdr else _NAME_ESC
-    n = "".join(esc.get(ch, ch) for ch in n)
+    n = n.translate(esc)
     return "\\u005b" + n[1:] if n.startswith("[") else n
 
 
@@ -407,12 +409,6 @@ class Toklex:
             raise ToklexError(f"Toklex schema: {path} is not a JSON object")
         cls._check(s)
         return cls(cls._norm_schema(s), hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()[:4])
-
-    @classmethod
-    def from_dict(cls, s: dict, version: str) -> "Toklex":
-        """A schema already in memory. The version is the caller's, because it is a hash of the file bytes."""
-        cls._check(s)
-        return cls(cls._norm_schema(s), version)
 
     @staticmethod
     def _norm_schema(s: dict) -> dict:

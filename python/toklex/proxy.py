@@ -66,9 +66,9 @@ class Proxy:
 
     def write(self, msg: Any) -> None:
         try:
-            data = json.dumps(msg, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            data = json.dumps(msg, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
         except UnicodeEncodeError:  # a lone surrogate, as Node writes when it cuts an emoji in half: send it escaped
-            data = json.dumps(msg, separators=(",", ":")).encode("ascii")
+            data = json.dumps(msg, separators=(",", ":"), allow_nan=False).encode("ascii")
         self.send(data)
 
     def answer(self, mid: Any, result: dict) -> None:
@@ -81,7 +81,7 @@ class Proxy:
         try:
             self.up.stdin.write(line.rstrip(b"\r\n") + b"\n")
             self.up.stdin.flush()
-        except (BrokenPipeError, OSError):
+        except OSError:
             pass  # the server is gone, and the end of its stdout ends the proxy
 
     def from_client(self, line: bytes) -> None:
@@ -113,7 +113,7 @@ class Proxy:
             mode = self.tx.mode(name, args)
             msg["params"] = dict(params, arguments=args)
             self.pending[key] = ("call", name, mode)
-            return json.dumps(msg, separators=(",", ":")).encode("ascii")
+            return json.dumps(msg, separators=(",", ":"), allow_nan=False).encode("ascii")  # 1e400 would become Infinity, which is no JSON
         if method == "resources/read" and str(params.get("uri", "")).startswith("toklex://"):
             body = self.tx.read_resource(params["uri"])
             if body is not None:
