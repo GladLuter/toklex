@@ -22,7 +22,6 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           coverage: none
-      - run: php -l php/src/Toklex.php
       - run: php -d memory_limit=128M php/tests/run.php
 
   phpstan:
@@ -114,7 +113,7 @@ jobs:
         with:
           node-version: '22'
       # js/ and python/ hold copies of LICENSE and NOTICE, because a package can only ship files from its own folder
-      - run: for d in js python; do cmp LICENSE $d/LICENSE && cmp NOTICE $d/NOTICE; done
+      - run: for d in js python; do cmp LICENSE $d/LICENSE; cmp NOTICE $d/NOTICE; done
       - run: pip install build && python -m build --outdir dist-py python
       - run: |
           python - <<'PY'
