@@ -11,7 +11,6 @@ const FX = join(ROOT, 'spec', 'fixtures');
 let n = 0;
 const fails: string[] = [];
 type O = Record<string, unknown>;
-const own = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
 
 /** Strict equality, except that two numbers are equal when they differ by less than 1e-9, and an empty object equals an empty list as PHP arrays do. */
 function same(a: unknown, b: unknown): boolean {
@@ -50,6 +49,8 @@ for (const f of files('invalid')) check(`invalid/${f} is rejected`, true, raises
 check('missing file is rejected', true, raises(() => Toklex.fromFile(join(FX, 'nope.json'))));
 writeFileSync(join(tmp, 'junk.json'), 'not json');
 check('non-JSON file is rejected', true, raises(() => Toklex.fromFile(join(tmp, 'junk.json'))));
+writeFileSync(join(tmp, 'bad-utf8.json'), Buffer.from('{"toklex":1,"id":"t","keys":{"a":"x\xffy"}}', 'latin1'));
+check('a schema file with invalid UTF-8 is rejected, as in PHP', true, raises(() => Toklex.fromFile(join(tmp, 'bad-utf8.json'))));
 
 const tx = Toklex.fromFile(join(FX, 'test.schema.json'));
 const v = tx.version();
@@ -114,6 +115,7 @@ check('the fixture folders hold what section 10 counts', cnt.slice(1).map(Number
 
 const hd = `~tx@${v} i:+`;
 const tp = Toklex.fromFile(join(FX, 'plain.schema.json'));
+check('instructionsText gives the blocks as PHP does', 'rule: Use only the fields in this reply.\nnotice: Line one.\nLine two.', tp.instructionsText());
 const lastLine = (row: O) => tx.encode('get_station', [row]).split('\n').pop();
 check('a very small and a very large float have no exponent', 'x|0.00000015|100000000000000000000', lastLine({ k: 'x', a: 1.5e-7, b: 1e20 }));
 check('shortest digits, scaled on decimal digits', ['x|0.1|12345678.9|-3.25', `${hd}\nv\n2\n-2\n1`],
@@ -213,7 +215,7 @@ check('a map with the keys 0, 1 in order is a list as in PHP, other maps stay ma
   [tx.encode('get_station', [{ station_id: 'x', a: new Map([['0', 1], ['1', 2]]) }]), tx.encode('get_station', [{ station_id: 'x', a: new Map([['1', 1], ['0', 2]]) }])]);
 check('a JSON object cell with the keys 0, 1 stays an object, as JSON.parse loses their order', [{ 0: 1, 1: 2 }], (tx.decode(`${hd}\nlb\n[{"0":1,"1":2}]`).rows[0] as O).labels);
 const proto = tx.decode(`${hd}\n__proto__.x|a\n1|2`).rows[0] as O;
-check('a column named __proto__ is an own key and leaves the prototype alone', [true, true], [own(proto, '__proto__'), Object.getPrototypeOf(proto) === Object.prototype]);
+check('a column named __proto__ is an own key and leaves the prototype alone', [true, true], [Object.hasOwn(proto, '__proto__'), Object.getPrototypeOf(proto) === Object.prototype]);
 check('an inputSchema {} stays without a type, as in PHP', { properties: { toklex_mode: { type: 'string', enum: ['off', 'safe', 'dense'], description: 'Reply format: off, safe or dense.' } } },
   tx.withTools([{ name: 'a', inputSchema: {} }], () => {})[0].inputSchema);
 check('an outputSchema that is null is removed', false, 'outputSchema' in tx.withTools([{ name: 'a', outputSchema: null }], () => {})[0]);

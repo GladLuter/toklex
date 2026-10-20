@@ -1,6 +1,7 @@
 // Toklex protocol. Copyright 2026 Yevgenii Slieptsov (GladLuter). https://github.com/GladLuter/toklex
 // Licensed under Apache-2.0. See LICENSE.
 // Toklex for TypeScript: a port of php/src/Toklex.php that passes spec/fixtures.
+import { isUtf8 } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
@@ -8,7 +9,6 @@ export const SCHEMA_TOOL = 'toklex_schema';
 export const CALIBRATE_TOOL = 'toklex_calibrate';
 
 export type Mode = 'off' | 'safe' | 'dense';
-export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 export interface Schema {
   toklex: number;
   id: string;
@@ -110,7 +110,6 @@ type Obj = Record<string, unknown>;
 type Dict = Map<string, unknown>;
 const isObj = (x: unknown): x is Obj => typeof x === 'object' && x !== null && !Array.isArray(x);
 const isNum = (x: unknown): x is number | bigint => typeof x === 'number' || typeof x === 'bigint';
-const own = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
 /** An own property, also for the key __proto__, which a plain assignment would take for the prototype. */
 const set = (o: Obj, k: string, v: unknown): void => {
   if (k === '__proto__') {
@@ -120,13 +119,9 @@ const set = (o: Obj, k: string, v: unknown): void => {
   }
 };
 
-/** The string with each lone surrogate replaced by U+FFFD, the counterpart of invalid UTF-8 in PHP. */
-function u8(s: string): string {
-  return s.toWellFormed();
-}
-
+// a lone surrogate becomes U+FFFD, as invalid UTF-8 does in PHP
 function jstr(s: string): string {
-  return JSON.stringify(u8(s));
+  return JSON.stringify(s.toWellFormed());
 }
 
 /** Strict JSON. Throws on bad input. An integer outside the safe range comes back as a bigint with all its digits. */
@@ -465,7 +460,7 @@ export class Toklex {
     } catch {
       throw new ToklexError(`Toklex schema: cannot read ${path}`);
     }
-    return Toklex.fromText(raw.toString('utf8'), path);
+    return Toklex.fromText(isUtf8(raw) ? raw.toString('utf8') : '', path); // invalid UTF-8 is no JSON, as in PHP
   }
 
   /** A schema file's text. The version hashes the text as UTF-8 with CRLF turned into LF. */
@@ -554,13 +549,13 @@ export class Toklex {
         t.description = d;
       }
       // a tool with an outputSchema must return structuredContent, and a Toklex reply is one text block (spec 9)
-      if (own(t, 'outputSchema')) {
+      if (Object.hasOwn(t, 'outputSchema')) {
         delete t.outputSchema;
         warn(`Toklex: tool '${name}' loses its outputSchema, a Toklex reply carries no structuredContent`);
       }
       const inp: Obj = { ...((t.inputSchema as Obj | undefined) ?? { type: 'object' }) };
       const props: Obj = { ...((inp.properties as Obj | undefined) ?? {}) };
-      if (!own(props, 'toklex_mode')) {
+      if (!Object.hasOwn(props, 'toklex_mode')) {
         props.toklex_mode = { type: 'string', enum: [...MODES], description: 'Reply format: off, safe or dense.' };
       }
       inp.properties = props;
@@ -601,7 +596,7 @@ export class Toklex {
     let md = mode !== null && [...MODES, 'auto'].includes(mode) ? mode : this.defaultMode(tool);
     const head: Dict = new Map();
     for (const [k, v] of meta instanceof Map ? meta : Object.entries(meta)) {
-      const c = this.kf.get(String(k)) ?? u8(String(k));
+      const c = this.kf.get(String(k)) ?? String(k).toWellFormed();
       if ((this.style() === 'plain' ? ['error'] : ['i', 'e']).includes(c)) {
         throw new ToklexError(`Toklex: meta key ${c} is reserved`);
       }
@@ -660,7 +655,7 @@ export class Toklex {
   /** codeOrText is a code from values.e or its full message. An error has no records, so only off differs from a header line. */
   error(codeOrText: string, mode: string | null = null, instructions = true): string {
     const e = this.s.values?.e ?? {};
-    const code = own(e, codeOrText) ? codeOrText : Object.keys(e).find((c) => e[c] === codeOrText) ?? null;
+    const code = Object.hasOwn(e, codeOrText) ? codeOrText : Object.keys(e).find((c) => e[c] === codeOrText) ?? null;
     const text = code === null ? codeOrText : e[code];
     if (mode === 'off') {
       return this.off([['error', text]], instructions);
@@ -683,8 +678,8 @@ export class Toklex {
       }
       const at = j.schema.indexOf('@');
       return {
-        schema: j.schema.slice(0, at), version: j.schema.slice(at + 1), instructions: own(j, 'instructions'),
-        meta: own(j, 'error') ? { [this.style() === 'plain' ? 'error' : 'e']: j.error } : ((j.meta as Obj) ?? {}),
+        schema: j.schema.slice(0, at), version: j.schema.slice(at + 1), instructions: Object.hasOwn(j, 'instructions'),
+        meta: Object.hasOwn(j, 'error') ? { [this.style() === 'plain' ? 'error' : 'e']: j.error } : ((j.meta as Obj) ?? {}),
         rows: (j.rows as unknown[]) ?? [],
       };
     }
@@ -793,7 +788,7 @@ export class Toklex {
       }
     }
     const cal = new Toklex(CAL_SCHEMA, '0000');
-    if (!isObj(answers) || !Object.keys(CAL_QUESTIONS).some((q) => own(answers as Obj, q))) {
+    if (!isObj(answers) || !Object.keys(CAL_QUESTIONS).some((q) => Object.hasOwn(answers as Obj, q))) {
       const q = Object.entries(CAL_QUESTIONS).map(([id, [block, text]]) => `${id} (${block} block): ${text}`);
       return ['Toklex calibration',
         'The two blocks below hold the same 8 records, once as a safe table and once as a dense table. The legend covers this test only. Answer the six questions from the text on this page.',
@@ -847,7 +842,7 @@ export class Toklex {
     }
     h += `~${this.s.id}@${this.v}` + (Object.keys(ins).length && this.style() === 'coded' ? ' i:+' : '');
     for (const [k, v] of meta) {
-      const c = this.kf.get(k) ?? u8(k);
+      const c = this.kf.get(k) ?? k.toWellFormed();
       const t = typeof v === 'object' && v !== null ? quote(this.js(v, true, c)) : this.cell(v, c, true);
       if (t !== '') {
         h += ' ' + this.label(name(c, true), c) + ':' + t;
@@ -878,7 +873,7 @@ export class Toklex {
   private flat(row: Dict, path = ''): Map<string, [string, unknown]> {
     const out = new Map<string, [string, unknown]>();
     for (const [k, v] of row) {
-      const c = this.kf.get(k) ?? u8(k);
+      const c = this.kf.get(k) ?? k.toWellFormed();
       const p = path === '' ? name(c) : path + '.' + name(c);
       if (v instanceof Map && v.size && !listlike(v.keys())) {
         for (const [q, x] of this.flat(v, p)) {
@@ -912,7 +907,7 @@ export class Toklex {
     if (typeof v === 'object') {
       return this.js(v, true, c).replaceAll('|', BAR);
     }
-    const s = u8(String(v));
+    const s = String(v).toWellFormed();
     const code = this.vf.get(c)?.get(s);
     if (code !== undefined) {
       return code;
@@ -946,7 +941,7 @@ export class Toklex {
     if (isNum(x)) {
       return num(x, coded && k !== null ? this.sc.get(k) : null) ?? 'null';
     }
-    let s = u8(String(x));
+    let s = String(x).toWellFormed();
     const code = coded && k !== null ? this.vf.get(k)?.get(s) : undefined;
     s = code ?? s;
     return jstr(s);
@@ -1024,7 +1019,7 @@ export class Toklex {
         set(cont!, key, cur);
       }
       const o = cur as Obj;
-      if (!own(o, kk)) {
+      if (!Object.hasOwn(o, kk)) {
         set(o, kk, null);
       }
       cont = o;
@@ -1055,7 +1050,7 @@ export class Toklex {
     if (!['reply', 'server'].includes((s.instructions_at as string) ?? 'reply')) {
       fail('instructions_at must be reply or server');
     }
-    if (!plain && own(s, 'instructions_at')) {
+    if (!plain && Object.hasOwn(s, 'instructions_at')) {
       fail('instructions_at needs style plain');
     }
     const obj = (n: string): Obj => {
