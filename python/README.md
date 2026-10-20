@@ -20,7 +20,13 @@ Return `text` as one MCP `text` content block and add no `structuredContent`.
 
 The methods follow the PHP names in snake case: `error`, `decode`, `version`, `style`, `instructions_text`, `schema_text`, `calibrate`, `resources` and `read_resource`. `encode` and `error` take `instructions=False` to leave the instruction text out of a reply the model has read before (spec 5.1). `with_tools` takes a `warn` callback, and without it warnings go to `logging.getLogger("toklex")`.
 
-Values that JSON has no type for are turned into what JSON would carry: a `datetime` or `date` is ISO 8601 text (the date alone at midnight), an `Enum` is its value, a `Decimal` is a number with its exact digits, a tuple is a list, and a dataclass, a pydantic model or another object is the dict of its public attributes.
+Values that JSON has no type for are turned into what JSON would carry:
+
+- A `datetime` or `date` is ISO 8601 text, the date alone at midnight. A `datetime` without a zone gets `+00:00`, as in PHP.
+- An `Enum` is its value. A `Decimal` is a number with its exact digits. A tuple is a list.
+- A dataclass, a pydantic model or another object is the dict of its public attributes. A function is `None`.
+- A dict with the keys `"0"`, `"1"` and so on, in that order, is a list, as PHP keeps it.
+- A value that holds itself is `None` where it repeats. A list or dict 64 levels below the record is `None`.
 
 ## Proxy
 

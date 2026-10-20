@@ -6,7 +6,7 @@ The first version of Toklex used short codes for names and values. It is now cal
 
 Coded is still there. Put `"style": "coded"` in the schema and you get the v0.1 behaviour, with the `toklex_schema` tool, the contract line and `toklex_calibrate`.
 
-This repository holds the protocol ([spec/toklex.md](spec/toklex.md)), a PHP library, ports to Python and TypeScript, a proxy that puts Toklex in front of any stdio MCP server, a conformance suite and an offline bench. Status is draft v0.3.
+This repository holds the protocol ([spec/toklex.md](spec/toklex.md)), a PHP library, ports to Python and TypeScript, a proxy that puts Toklex in front of any stdio MCP server, a conformance suite and an offline bench. Status is draft v0.3. Section 15 of the spec lists what changed from v0.2.
 
 ## Example
 
@@ -81,7 +81,7 @@ st-103|Bay Point|co|nb|h|1534|120|905
 | `dense` | One line per column, with runs (`MEDIUM*2`) and date sequences (`2026-07-01+1d`). | A long series of one record over dates, such as a history. |
 | `off` | Compact JSON with full names and the instructions. | The model misreads the table, or you need plain JSON. |
 
-A tool is safe by default. The schema lists the tools that are dense by default in `dense`, and the tools that pick a mode per reply in `auto`. An auto tool answers dense when the reply has at least 10 records and a column of dates with a fixed step, and safe otherwise. That follows the production run of 2026-10-19 below: dense was the cheapest form of a 30-day history and cost more than safe on a short list.
+A tool is safe by default. The schema lists the tools that are dense by default in `dense`. It lists the tools that pick a mode per reply in `auto`. An auto tool answers dense when the reply has at least 10 records and a date column that rises by the same number of days from each record to the next. Otherwise it answers safe. A history with the newest date first has falling dates, so it stays safe. This rule follows the production run of 2026-10-19 below. Dense was the cheapest form of a 30-day history there, and it cost more than safe on a short list.
 
 Dense makes the reply shorter, but the model has to put the rows back together from the columns, and that costs output tokens. Output costs more than input. On a short list with many columns dense can cost more than safe. Measure dense by what a session costs. The production run of 2026-10-19 below shows both cases.
 
@@ -270,7 +270,17 @@ return $tx->encode($name, $rows, ['date' => '2026-09-30'], $mode);
 
 Return each reply as one MCP `text` content block and add no `structuredContent`. `withTools` removes `outputSchema` from your tools for that reason, because MCP requires `structuredContent` from a tool that declares one. It accepts tools given as arrays or as `stdClass`. A warning goes to the callback you pass as the second argument, or to `error_log` without one. It never goes to stdout, which carries the messages of a stdio server.
 
-`encode` takes a list of records. One record goes in as `[$row]`. A record that is not an array or an object makes it throw `InvalidArgumentException` with that advice. Values that PHP keeps as objects go out as JSON would carry them: a `DateTimeInterface` as ISO 8601 text, the date alone when the time is midnight, a backed enum as its value, a pure enum as its name, a `JsonSerializable` as what it returns, and any other object as its public properties.
+`encode` takes a list of records. One record goes in as `[$row]`. A record that is not an array or an object makes it throw `InvalidArgumentException` with that advice.
+
+Values that PHP keeps as objects go out as JSON would carry them:
+
+- A `DateTimeInterface` is ISO 8601 text. At midnight it is the date alone.
+- A backed enum is its value, and a pure enum is its name.
+- A `JsonSerializable` is what it returns. After 8 such steps the value is null.
+- An `ArrayObject` is its array. A `Stringable` is its text. A closure is null.
+- Any other object is the map of its public properties.
+
+A value that holds itself is null where it repeats. A list or map 64 levels below the record is null. So such data never makes `encode` fail.
 
 Rows from PDO or another database driver can go in as they are. In a scaled field the library reads a number string such as `"0.092375"` as the number. A string with an exponent, such as `"4e-5"`, stays a quoted string and is not scaled. MySQL and MariaDB can send a `DOUBLE` column that way, so cast it to a number in your query code first.
 
@@ -292,7 +302,7 @@ The rules cost tokens on every reply, 118 per reply on the production server bel
 Other methods:
 
 - `$tx->error('nf', $mode)` encodes an error. It takes a code from `values.e` or the full message.
-- `$tx->decode($reply)` reads a reply back into full names and values. Use it in tests. It refuses a dense reply of more than 100000 records or 1000000 cells, so a forged reply cannot exhaust memory.
+- `$tx->decode($reply)` reads a reply back into full names and values. Use it in tests. It refuses a reply that claims more than 100000 records, costs more than 500000 cells or has a column path of more than 64 names. Section 11 of the spec says how the cost is counted. At the limit the PHP reader takes about 80 MB, so a forged reply stays inside the default `memory_limit` of 128 MB. It also refuses a date sequence that starts at an invalid date or runs past 9999-12-31.
 - `$tx->version()` returns the schema version.
 - `$tx->style()` returns `plain` or `coded`.
 - `$tx->resources()` and `$tx->readResource($uri)` serve the optional resources. A plain server has `toklex://modes`. A coded server also has `toklex://schema`.
@@ -331,6 +341,8 @@ const text = tx.encode(name, rows, { date: '2026-09-30' }, tx.mode(name, args));
 ```
 
 The Python port needs Python 3.9 or newer, the TypeScript port Node 22.18 or newer. Neither has runtime dependencies. Each folder has a README with the details for its language.
+
+Two limits come from JavaScript. An object puts keys that look like array indexes, such as `"0"`, before its other keys. Pass a record as a `Map` when such names must keep their place, and the reply matches PHP byte for byte. `decode` returns plain objects, so there such keys come first. An integer above 2^53 has lost digits in a JavaScript number. Pass it as a `bigint`. `decode` returns a `bigint` for an integer cell outside the safe range.
 
 ## Proxy
 
