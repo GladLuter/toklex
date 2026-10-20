@@ -4,3 +4,6 @@ bench/live/out/
 __pycache__/
 /vendor/
 composer.lock
+python/build/
+python/dist/
+*.egg-info/
