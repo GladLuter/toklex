@@ -130,7 +130,9 @@ python bench/tokens.py
 
 `bench/tokens.py` needs `pip install -r bench/requirements.txt`. The example schema is plain, so this measures plain. To measure coded, copy the schema, add `"style": "coded"` and encode the copy.
 
-The numbers above count with o200k_base, which is OpenAI's tokenizer and runs offline. `python bench/tokens.py --counter claude` counts with the Anthropic `count_tokens` endpoint instead, so the table uses the tokenizer of the model that reads the replies. It needs `pip install anthropic` and an API key. `--model` picks the model, `claude-opus-5-5` by default. `bench/live.py summarize` takes the same `--counter`, and it reports the mean, the standard deviation and the number of runs per variant and per question, because three runs per question vary about as much as the variants differ.
+The numbers above count with o200k_base, which is OpenAI's tokenizer and runs offline. `python bench/tokens.py --counter claude` counts with the Anthropic `count_tokens` endpoint instead. It uses the tokenizer of the model named by `--model`, `claude-opus-5-5` by default. Pass the model that reads the replies in your sessions. The production runs below used Claude Sonnet. The counter needs `pip install anthropic` and an API key in `ANTHROPIC_API_KEY`, or a login with `ant auth login`. An empty text counts 0 without a request.
+
+`bench/live.py summarize` takes the same `--counter`, and there `--count-model` names the model. Per question it reports the mean, the standard deviation and the number of runs, because three runs per question vary about as much as the variants differ. One run has no spread, so its standard deviation is `null`. For a whole variant it reports the mean and the number of runs only, because those runs ask different questions. The summary goes to stdout and to `summary.json`. The single runs are in `summary.json` only.
 
 ### Production measurements
 
