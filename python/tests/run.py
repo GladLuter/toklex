@@ -145,6 +145,7 @@ check("a column path of 64 names decodes, 65 or 1000 are refused", [1, "refused"
       [refused(f"{dh}\n" + ".".join(["a"] * 64) + "\n1"), refused(f"{dh}\n" + ".".join(["a"] * 65) + "\n1"), refused(f"{dh}\n" + ".".join(["a"] * 1000) + "\n" + "\n".join(["1"] * 2000))])
 safe = lambda n, k: f"{dh}\n" + "|".join(f"c{i}" for i in range(k)) + "\n" + "\n".join(["|".join(["1"] * k)] * n)  # noqa: E731
 check("safe mode has the same cost limit", [100000, "refused"], [refused(safe(100000, 5)), refused(safe(100000, 6))])
+check("safe mode has the same record limit", [100000, "refused", "refused"], [refused(safe(100000, 1)), refused(safe(100001, 1)), refused(f"{dh}\n\n" + "\n" * 100001)])
 t0 = time.time()
 check("a run of a long JSON array is refused before it is decoded", ["refused", True], [refused(f"{dh}\n[10000]\na:[" + ",".join(map(str, range(3000))) + "]*10000"), time.time() - t0 < 1])
 check("each [ or { in a JSON array cell costs 8", [7000, "refused"], [refused(f"{dh}\n[7000]\na:" + "[" * 8 + "]" * 8 + "*7000"), refused(f"{dh}\n[8000]\na:" + "[" * 8 + "]" * 8 + "*8000")])

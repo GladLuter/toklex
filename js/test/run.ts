@@ -146,6 +146,7 @@ check('a column path of 64 names decodes, 65 or 1000 are refused', [1, 'refused'
   [rows(`${hd}\n${times('a', 64).join('.')}\n1`), rows(`${hd}\n${times('a', 65).join('.')}\n1`), rows(`${hd}\n${times('a', 1000).join('.')}\n${times('1', 2000).join('\n')}`)]);
 const safe = (n: number, k: number) => `${hd}\n${Array.from({ length: k }, (_, i) => `c${i}`).join('|')}\n${times(times('1', k).join('|'), n).join('\n')}`;
 check('safe mode has the same cost limit', [100000, 'refused'], [rows(safe(100000, 5)), rows(safe(100000, 6))]);
+check('safe mode has the same record limit', [100000, 'refused', 'refused'], [rows(safe(100000, 1)), rows(safe(100001, 1)), rows(`${hd}\n\n${'\n'.repeat(100001)}`)]);
 const t1 = Date.now();
 check('a run of a long JSON array is refused before it is decoded', ['refused', true], [rows(`${hd}\n[10000]\na:[${Array.from({ length: 3000 }, (_, i) => i).join(',')}]*10000`), Date.now() - t1 < 1000]);
 check('each [ or { in a JSON array cell costs 8', [7000, 'refused'], [rows(`${hd}\n[7000]\na:${'['.repeat(8)}${']'.repeat(8)}*7000`), rows(`${hd}\n[8000]\na:${'['.repeat(8)}${']'.repeat(8)}*8000`)]);

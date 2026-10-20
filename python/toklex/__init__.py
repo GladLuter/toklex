@@ -619,6 +619,8 @@ class Toklex:
                         self._put(rows[r], keys, None)
             else:
                 cols = [] if lines[1] == "" else [self._column(strip(c)) for c in lines[1].split("|")]
+                if len(lines) - 2 > _MAX_RECORDS:
+                    raise ToklexError(f"Toklex: a reply of more than {_MAX_RECORDS} records is refused")
                 for line in lines[2:]:
                     cells = line.split("|")
                     row: dict = {}
