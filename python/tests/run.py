@@ -1,6 +1,6 @@
 # Toklex protocol. Copyright 2026 Yevgenii Slieptsov (GladLuter). https://github.com/GladLuter/toklex
 # Conformance runner for the Python port. Run: python python/tests/run.py
-import dataclasses, datetime as dt, decimal, enum, glob, json, math, os, re, sys, tempfile
+import dataclasses, datetime as dt, decimal, enum, glob, json, math, os, re, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -128,7 +128,38 @@ check("an impossible date is not a sequence", f"{dh}\n[3]\nt:2026-02-27|2026-02-
 check("a date sequence reads back as N dates", ["2026-07-01", "2026-07-08", "2026-07-15"], [r["date"] for r in tx.decode(f"{dh}\n[3]\nt:2026-07-01+7d")["rows"]])
 check("a run longer than the record count is cut at N", [{"name": "x"}, {"name": "x"}], tx.decode(f"{dh}\n[2]\nn:x*9")["rows"])
 check("a forged record count is refused", [True, True], [raises(lambda: tx.decode(f"{dh}\n[100001]\nn:x")), raises(lambda: tx.decode(f"{dh}\n[100000]\n" + "\n".join(f"c{i}:x*100000" for i in range(200))))])
-check("the cell limit itself still decodes", 100000, len(tx.decode(f"{dh}\n[100000]\n" + "\n".join(f"c{i}:x*100000" for i in range(10)))["rows"]))
+
+
+def refused(text):
+    try:
+        return len(tx.decode(text)["rows"])
+    except ToklexError:
+        return "refused"
+
+
+# review 2026-10-19, item 1: the cost of a reply bounds memory and time (spec 11)
+cols = lambda n, k, cell="x": f"{dh}\n[{n}]\n" + "\n".join(f"c{i}:{cell}*{n}" for i in range(k))  # noqa: E731
+check("a reply at the cost limit decodes and one more column is refused", [100000, "refused"], [refused(cols(100000, 5)), refused(cols(100000, 6))])
+check("a nested column costs its depth", "refused", refused(f"{dh}\n[100000]\n" + ".".join(["a"] * 10) + ":x*100000"))
+check("a column path of 64 names decodes, 65 or 1000 are refused", [1, "refused", "refused"],
+      [refused(f"{dh}\n" + ".".join(["a"] * 64) + "\n1"), refused(f"{dh}\n" + ".".join(["a"] * 65) + "\n1"), refused(f"{dh}\n" + ".".join(["a"] * 1000) + "\n" + "\n".join(["1"] * 2000))])
+safe = lambda n, k: f"{dh}\n" + "|".join(f"c{i}" for i in range(k)) + "\n" + "\n".join(["|".join(["1"] * k)] * n)  # noqa: E731
+check("safe mode has the same cost limit", [100000, "refused"], [refused(safe(100000, 5)), refused(safe(100000, 6))])
+t0 = time.time()
+check("a run of a long JSON array is refused before it is decoded", ["refused", True], [refused(f"{dh}\n[10000]\na:[" + ",".join(map(str, range(3000))) + "]*10000"), time.time() - t0 < 1])
+check("each [ or { in a JSON array cell costs 8", [7000, "refused"], [refused(f"{dh}\n[7000]\na:" + "[" * 8 + "]" * 8 + "*7000"), refused(f"{dh}\n[8000]\na:" + "[" * 8 + "]" * 8 + "*8000")])
+check("rows of a run never share a list", False, (lambda r: r[0]["labels"] is r[1]["labels"])(tx.decode(f"{dh}\n[2]\nlb:[1]*2")["rows"]))
+check("a JSON array cell nested 64 levels is read, 65 levels stay text", [list, str],
+      [type(tx.decode(f"{dh}\nlb\n" + "[" * 64 + "]" * 64)["rows"][0]["labels"]), type(tx.decode(f"{dh}\nlb\n" + "[" * 65 + "]" * 65)["rows"][0]["labels"])])
+
+# review 2026-10-19, item 4 and item 3c: forged date sequences are refused, the calendar holds at year 0000
+for seq in ("2026-13-45+1d", "2026-02-30+1d", "2026-01-01+99999999999999999999d", "9999-12-30+1d"):
+    check(f"the date sequence {seq} is refused as a reply", "refused", refused(f"{dh}\n[3]\nt:{seq}"))
+check("a date sequence that ends on 9999-12-31 reads back", ["9999-12-30", "9999-12-31"], [r["date"] for r in tx.decode(f"{dh}\n[2]\nt:9999-12-30+1d")["rows"]])
+check("a leap day of year 0000 is a date sequence both ways", [f"{dh}\n[3]\nt:0000-02-27+1d", ["0000-02-27", "0000-02-28", "0000-02-29"]],
+      [tx.encode("station_history", [{"date": d} for d in ("0000-02-27", "0000-02-28", "0000-02-29")]), [r["date"] for r in tx.decode(f"{dh}\n[3]\nt:0000-02-27+1d")["rows"]]])
+check("a date sequence crosses from year 0000 into 0001", ["0000-12-31", "0001-01-01", "0001-01-02"], [r["date"] for r in tx.decode(f"{dh}\n[3]\nt:0000-12-31+1d")["rows"]])
+check("a forged run count of 5000 digits is cut at N", [{"name": "x"}], tx.decode(f"{dh}\n[1]\nn:x*" + "9" * 5000)["rows"])
 check("an escaped name never splits into two names in any mode", [{"a|b": "x", "my key": "y"}, {"k:x y": "z"}],
       [tp.decode(tp.encode("station_history", [{"a|b": "x", "my key": "y"}]))["rows"][0], tp.decode(tp.encode("get_station", [], {"k:x y": "z"}))["meta"]])
 
@@ -152,6 +183,36 @@ check("any other date-time is ISO 8601 with the offset, and a fraction only when
                                 {"k": dt.datetime(2026, 7, 1, 10, 30, 0, 250000, tzinfo=dt.timezone.utc)}]))
 check("a dataclass is the map of its public fields, a Decimal is a number", f"{hd}\nid|k.x|v\na|3|1235",
       tx.encode("get_station", [{"station_id": "a", "k": Point(3, 9), "rain_m": decimal.Decimal("0.12345")}]))
+
+# review 2026-10-19, items 11 and 14: no value loses data in silence or makes the encoder fail, and the ports agree
+loop = {"id": "a"}
+loop["me"] = loop
+check("a dict that holds itself is None where it repeats, in every mode", [f"{hd}\nid|me\na", True],
+      [tx.encode("get_station", [loop]), '"rows":[{"id":"a","me":null}]' in tx.encode("get_station", [loop], {}, "off")])
+deep = "x"
+for _ in range(70):
+    deep = {"k": deep}
+check("a map nested past 64 levels stops there, and the reply reads back", [63, True],
+      [tx.encode("get_station", [{"d": deep}]).split("\n")[1].count("."), tx.decode(tx.encode("get_station", [{"d": deep}]))["rows"] != []])
+
+
+class Chain:
+    def __init__(self, n):
+        self.n = n
+
+    def model_dump(self):
+        return Chain(self.n - 1) if self.n else "end"
+
+
+check("a function is None, a chain of 8 conversions is followed and a longer one is None", [f"{hd}\nf|c\n|end", f"{hd}\nc\n|"],
+      [tx.encode("get_station", [{"f": len, "c": Chain(7)}]), tx.encode("get_station", [{"c": Chain(8)}])])
+check("a dict with the keys 0, 1 in order is a list as in PHP, other dicts stay maps", [f"{hd}\nid|a\nx|[1,2]", f"{hd}\nid|a.1|a.0\nx|1|2"],
+      [tx.encode("get_station", [{"station_id": "x", "a": {"0": 1, "1": 2}}]), tx.encode("get_station", [{"station_id": "x", "a": {"1": 1, "0": 2}}])])
+check("a JSON object cell with the keys 0, 1 reads back as a list", [[[1, 2]]], [r["labels"] for r in tx.decode(f'{hd}\nlb\n[{{"0":1,"1":2}}]')["rows"]])
+check("a naive datetime gets +00:00 as PHP gives every date-time a zone", f"{hd}\nk\n2026-07-01T10:30:00+00:00", tx.encode("get_station", [{"k": dt.datetime(2026, 7, 1, 10, 30)}]))
+check("an inputSchema {} stays without a type, as in PHP", {"properties": {"toklex_mode": {"type": "string", "enum": ["off", "safe", "dense"], "description": "Reply format: off, safe or dense."}}},
+      tx.with_tools([{"name": "a", "inputSchema": {}}], lambda m: None)[0]["inputSchema"])
+check("an outputSchema that is None is removed", False, "outputSchema" in tx.with_tools([{"name": "a", "outputSchema": None}], lambda m: None)[0])
 for what, bad in {"a dict": {"station_id": "a"}, "a number": [1], "None": [None]}.items():
     check(f"encode refuses {what} as a list of records, in every mode", [True, True],
           [raises(lambda: tx.encode("get_station", bad if what != "a dict" else ["x"])), raises(lambda: tx.encode("get_station", bad if what != "a dict" else ["x"], {}, "off"))])

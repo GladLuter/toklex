@@ -59,7 +59,9 @@ const PLAIN_MODES_TEXT = [
   "Pick a mode for one call with the optional argument toklex_mode. The values are off, safe and dense. If you leave it out or send another value, the tool's default mode applies.",
 ].join('\n');
 const MAX_RECORDS = 100000;
-const MAX_CELLS = 1000000;
+const MAX_CELLS = 500000; // the cost of a reply in cells (spec 11)
+const MAX_DEPTH = 64;
+const LAST_DAY = 2932896; // 9999-12-31 as days since 1970-01-01
 const AUTO_MIN = 10;
 // characters that would break a column line or a header, written as \uXXXX (spec 6.1)
 const NAME_ESC: Record<string, string> = {
@@ -104,9 +106,19 @@ export class ToklexError extends Error {
 }
 
 type Obj = Record<string, unknown>;
+// the encoder's map, which keeps the order of its keys: a plain object puts keys such as "1" first
+type Dict = Map<string, unknown>;
 const isObj = (x: unknown): x is Obj => typeof x === 'object' && x !== null && !Array.isArray(x);
 const isNum = (x: unknown): x is number | bigint => typeof x === 'number' || typeof x === 'bigint';
 const own = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
+/** An own property, also for the key __proto__, which a plain assignment would take for the prototype. */
+const set = (o: Obj, k: string, v: unknown): void => {
+  if (k === '__proto__') {
+    Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true });
+  } else {
+    o[k] = v;
+  }
+};
 
 /** The string with each lone surrogate replaced by U+FFFD, the counterpart of invalid UTF-8 in PHP. */
 function u8(s: string): string {
@@ -117,55 +129,123 @@ function jstr(s: string): string {
   return JSON.stringify(u8(s));
 }
 
-/** Strict JSON. Throws on bad input. */
+/** Strict JSON. Throws on bad input. An integer outside the safe range comes back as a bigint with all its digits. */
 function jload(t: string): unknown {
-  return JSON.parse(t);
+  return JSON.parse(t, (_k: string, v: unknown, ctx?: { source?: string }) =>
+    typeof v === 'number' && !Number.isSafeInteger(v) && ctx?.source !== undefined && /^-?[0-9]+$/.test(ctx.source) ? BigInt(ctx.source) : v);
 }
 
-/** The date alone at midnight UTC, so that a date column stays a date sequence. Otherwise the time, a fraction when there is one, and +00:00. */
-function iso(d: Date): string {
-  const s = d.toISOString();
-  if (s.endsWith('T00:00:00.000Z')) {
-    return s.slice(0, 10);
+/** How deep the lists and maps of a JSON text go, outside its strings. */
+function nest(t: string): number {
+  let depth = 0;
+  let top = 0;
+  let inStr = false;
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (inStr) {
+      if (ch === '\\') {
+        i++;
+      } else if (ch === '"') {
+        inStr = false;
+      }
+    } else if (ch === '"') {
+      inStr = true;
+    } else if (ch === '[' || ch === '{') {
+      top = Math.max(top, ++depth);
+    } else if (ch === ']' || ch === '}') {
+      depth--;
+    }
   }
-  const ms = d.getUTCMilliseconds();
-  return s.slice(0, 19) + (ms ? '.' + String(ms * 1000).padStart(6, '0') : '') + '+00:00';
+  return top;
+}
+
+/** True for a map whose keys are 0, 1, ... in order, which PHP keeps as a list. */
+function listlike(keys: Iterable<string>): boolean {
+  let i = 0;
+  for (const k of keys) {
+    if (k !== String(i++)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
- * A value as JSON would carry it (spec 11): a Date as ISO 8601 text, an object with toJSON by what it returns,
- * a Map as an object, a Set as an array, a class instance as its own enumerable properties.
- * undefined, functions and symbols count as absent.
+ * The date alone at midnight UTC, so that a date column stays a date sequence. Otherwise the time, a fraction when
+ * there is one, and +00:00. The year has at least four digits and a minus before a year BCE, as PHP writes it.
  */
-function val(v: unknown): unknown {
-  for (let i = 0; i < 8; i++) {
-    if (v === null || typeof v !== 'object') {
-      return typeof v === 'undefined' || typeof v === 'function' || typeof v === 'symbol' ? undefined : v;
-    }
-    if (Array.isArray(v)) {
-      return v;
-    }
-    if (v instanceof Date) {
-      return Number.isNaN(v.getTime()) ? null : iso(v);
-    }
-    if (v instanceof Map) {
-      return Object.fromEntries([...v].map(([k, x]) => [String(k), x]));
-    }
-    if (v instanceof Set) {
-      return [...v];
-    }
-    if (typeof (v as { toJSON?: unknown }).toJSON === 'function') {
-      v = (v as { toJSON: () => unknown }).toJSON();
-      continue;
-    }
-    return Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null ? v : { ...v };
+function iso(d: Date): string {
+  const p = (x: number, w = 2) => String(Math.abs(x)).padStart(w, '0');
+  const y = d.getUTCFullYear();
+  const date = (y < 0 ? '-' : '') + p(y, 4) + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+  const [h, mi, s, ms] = [d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds()];
+  if (!h && !mi && !s && !ms) {
+    return date;
   }
-  return v;
+  return `${date}T${p(h)}:${p(mi)}:${p(s)}` + (ms ? '.' + String(ms * 1000).padStart(6, '0') : '') + '+00:00';
 }
 
-/** Entries of a map without the absent values, as JSON.stringify leaves them out. */
-function entries(o: Obj): [string, unknown][] {
-  return Object.entries(o).filter(([, x]) => val(x) !== undefined);
+/**
+ * An object as JSON would carry it (spec 11): a Date as ISO 8601 text, an object with toJSON by what it returns,
+ * a Set as an array, and a Map or any other object as a Map of its entries. A chain of more than 8 toJSON steps is null.
+ */
+function val(v: object): unknown {
+  let x: unknown = v;
+  for (let i = 0; i < 8; i++) {
+    if (x === null || typeof x !== 'object') {
+      return x;
+    }
+    if (Array.isArray(x)) {
+      return x;
+    }
+    if (x instanceof Map) {
+      return new Map([...x].map(([k, e]) => [String(k), e]));
+    }
+    if (x instanceof Date) {
+      return Number.isNaN(x.getTime()) ? null : iso(x);
+    }
+    if (x instanceof Set) {
+      return [...x];
+    }
+    if (typeof (x as { toJSON?: unknown }).toJSON !== 'function') {
+      return new Map(Object.entries(x));
+    }
+    x = (x as { toJSON: () => unknown }).toJSON();
+  }
+  return x === null || typeof x !== 'object' ? x : null;
+}
+
+/**
+ * A value with only JSON types left in it, maps as Map (spec 11). A list or map that sits 64 levels below the record,
+ * or deeper, is null, and so is a value where it repeats inside itself. undefined, a function or a symbol is absent,
+ * as JSON.stringify has it: left out of a map, null in a list.
+ */
+function norm(v: unknown, level: number, on: ReadonlySet<object> = new Set()): unknown {
+  if (v === null || typeof v !== 'object') {
+    return typeof v === 'undefined' || typeof v === 'function' || typeof v === 'symbol' ? undefined : v;
+  }
+  if (on.has(v)) {
+    return null;
+  }
+  const path = new Set(on).add(v);
+  const x = val(v);
+  if (x === null || typeof x !== 'object') {
+    return norm(x, level, path);
+  }
+  if (level >= MAX_DEPTH) {
+    return null;
+  }
+  if (Array.isArray(x)) {
+    return x.map((e) => norm(e, level + 1, path) ?? null);
+  }
+  const o: Dict = new Map();
+  for (const [k, e] of x as Dict) {
+    const n = norm(e, level + 1, path);
+    if (n !== undefined) {
+      o.set(k, n);
+    }
+  }
+  return o;
 }
 
 /** A number as its shortest decimal text with no exponent. With a scale, that text times the scale in decimal, rounded half away from zero (spec 6.3). Null when it is not finite, also after scaling. */
@@ -239,10 +319,10 @@ function badCode(c: string): boolean {
   return c === '' || /[|*:"]/.test(c) || WS.test(c) || c[0] === '[' || c[0] === '{' || NUM.test(c) || ['true', 'false', 'null'].includes(c);
 }
 
-/** Days since 1970-01-01 in the proleptic Gregorian calendar. A day past the end of a month runs into the next one. */
+/** Days since 1970-01-01 in the proleptic Gregorian calendar (days_from_civil by H. Hinnant, with floor division). A day past the end of a month runs on into the next one. */
 function daysFromCivil(y: number, m: number, d: number): number {
   y -= m <= 2 ? 1 : 0;
-  const era = Math.floor((y >= 0 ? y : y - 399) / 400);
+  const era = Math.floor(y / 400);
   const yoe = y - era * 400;
   const doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1;
   const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
@@ -251,7 +331,7 @@ function daysFromCivil(y: number, m: number, d: number): number {
 
 function civilFromDays(z: number): string {
   z += 719468;
-  const era = Math.floor((z >= 0 ? z : z - 146096) / 146097);
+  const era = Math.floor(z / 146097);
   const doe = z - era * 146097;
   const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
   const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
@@ -304,26 +384,47 @@ function runs(cells: string[]): string {
   return o.join('|');
 }
 
-/** The N cell texts of one dense column line. A date sequence gives quoted dates, so they stay literals. */
-function expand(items: string, n: number): string[] {
-  const m = SEQ.exec(items);
-  if (m && Number(m[2]) >= 1 && Number(m[2]) <= 12) {
-    const d0 = daysFromCivil(Number(m[1]), Number(m[2]), Number(m[3]));
-    const step = Number(m[4]);
-    return Array.from({ length: n }, (_, i) => '"' + civilFromDays(d0 + i * step) + '"');
+/**
+ * The items of a dense column line as [cell text, K, 0] runs cut at N records, or one [null, first day, step] for a
+ * date sequence. Throws ToklexError on a date sequence that starts at an invalid date or runs past 9999-12-31.
+ */
+function items(text: string, n: number): [string | null, number, number][] {
+  if (SEQ.test(text)) {
+    const first = text.slice(0, 10);
+    const d = day(first);
+    if (d === null) {
+      throw new ToklexError(`Toklex: a date sequence starts at the invalid date ${first}`);
+    }
+    const digits = text.slice(11, -1);
+    const step = digits.length <= 7 ? Number(digits) : LAST_DAY;
+    if (n > 1 && d + (n - 1) * step > LAST_DAY) {
+      throw new ToklexError('Toklex: a date sequence runs past 9999-12-31');
+    }
+    return [[null, d, step]];
   }
-  const o: string[] = [];
-  for (const it of items.split('|')) {
-    if (o.length >= n) {
+  const o: [string | null, number, number][] = [];
+  for (const it of text.split('|')) {
+    if (n <= 0) {
       break;
     }
     const r = /^([\s\S]*)\*([0-9]+)$/.exec(it);
-    const k = r ? Math.min(Number(r[2]), n - o.length) : 1;
-    for (let i = 0; i < k; i++) {
-      o.push(r ? r[1] : it);
-    }
+    const k = r ? Math.min(r[2].length <= 9 ? Number(r[2]) : n, n) : 1;
+    o.push([r ? r[1] : it, k, 0]);
+    n -= k;
   }
   return o;
+}
+
+/** The cost a JSON array cell adds to its cell, read from its text: 1 per comma and 8 per [ or {. */
+function extra(t: string): number {
+  if (t[0] !== '[') {
+    return 0;
+  }
+  let c = 0;
+  for (const ch of t) {
+    c += ch === ',' ? 1 : ch === '[' || ch === '{' ? 8 : 0;
+  }
+  return c;
 }
 
 /** One schema. Load it with Toklex.fromFile(). */
@@ -444,17 +545,18 @@ export class Toklex {
     const contract = `Toklex reply ~${this.s.id}@${this.v}. If this version is not in context, call toklex_schema first. Never guess a code.`;
     const out: Tool[] = tools.map((tool) => {
       const t: Tool = { ...tool };
+      const name = t.name ?? '';
       if (!plain) {
         const d = typeof t.description === 'string' ? t.description + '\n\n' + contract : contract;
         if ([...d].length > 2048) {
-          warn(`Toklex: description of tool '${t.name}' is over 2048 characters, a client may cut the contract line`);
+          warn(`Toklex: description of tool '${name}' is over 2048 characters, a client may cut the contract line`);
         }
         t.description = d;
       }
       // a tool with an outputSchema must return structuredContent, and a Toklex reply is one text block (spec 9)
       if (own(t, 'outputSchema')) {
         delete t.outputSchema;
-        warn(`Toklex: tool '${t.name}' loses its outputSchema, a Toklex reply carries no structuredContent`);
+        warn(`Toklex: tool '${name}' loses its outputSchema, a Toklex reply carries no structuredContent`);
       }
       const inp: Obj = { ...((t.inputSchema as Obj | undefined) ?? { type: 'object' }) };
       const props: Obj = { ...((inp.properties as Obj | undefined) ?? {}) };
@@ -492,30 +594,36 @@ export class Toklex {
 
   /**
    * mode null means the tool's default. instructions false leaves the instruction text out of this reply (spec 5.1).
+   * A record or the metadata may be a Map, which keeps the order of keys such as "1" that a plain object puts first.
    * Throws ToklexError on a reserved meta key or a record that is not an object.
    */
-  encode(tool: string, rows: readonly unknown[], meta: Obj = {}, mode: string | null = null, instructions = true): string {
+  encode(tool: string, rows: readonly unknown[], meta: Obj | Map<string, unknown> = {}, mode: string | null = null, instructions = true): string {
     let md = mode !== null && [...MODES, 'auto'].includes(mode) ? mode : this.defaultMode(tool);
-    for (const k of Object.keys(meta)) {
-      const c = this.kf.get(k) ?? u8(k);
+    const head: Dict = new Map();
+    for (const [k, v] of meta instanceof Map ? meta : Object.entries(meta)) {
+      const c = this.kf.get(String(k)) ?? u8(String(k));
       if ((this.style() === 'plain' ? ['error'] : ['i', 'e']).includes(c)) {
         throw new ToklexError(`Toklex: meta key ${c} is reserved`);
       }
-    }
-    const recs: Obj[] = [...rows].map((r0, i) => {
-      const r = val(r0);
-      if (Array.isArray(r)) {
-        return Object.fromEntries(r.map((x, j) => [String(j), x]));
+      const n = norm(v, 1);
+      if (n !== undefined) {
+        head.set(String(k), n);
       }
-      if (!isObj(r)) {
+    }
+    const recs: Dict[] = [...rows].map((r0, i) => {
+      const r = norm(r0, 0);
+      if (Array.isArray(r)) {
+        return new Map(r.map((x, j) => [String(j), x]));
+      }
+      if (!(r instanceof Map)) {
         throw new ToklexError(`Toklex: record ${i} is ${r === null ? 'null' : typeof r}, not a record. Pass a list of records, such as [row] for one record.`);
       }
-      return r;
+      return r as Dict;
     });
     if (md === 'off') {
-      return this.off([['meta', meta], ['rows', recs]], instructions);
+      return this.off([['meta', head], ['rows', recs]], instructions);
     }
-    const out = [this.header(meta, instructions)];
+    const out = [this.header(head, instructions)];
     if (!recs.length) {
       return out[0];
     }
@@ -557,8 +665,8 @@ export class Toklex {
     if (mode === 'off') {
       return this.off([['error', text]], instructions);
     }
-    return this.style() === 'plain' ? this.header({}, instructions) + ' error:' + this.cell(text, 'error', true)
-      : this.header({}, instructions) + ' e:' + (code === null ? quote(codeOrText) : code);
+    return this.style() === 'plain' ? this.header(new Map(), instructions) + ' error:' + this.cell(text, 'error', true)
+      : this.header(new Map(), instructions) + ' e:' + (code === null ? quote(codeOrText) : code);
   }
 
   /** Reads a reply back with full key names and values. Throws ToklexError on a reply it refuses (spec 1). */
@@ -566,7 +674,7 @@ export class Toklex {
     if (text.startsWith('{')) {
       let j: unknown = null;
       try {
-        j = jload(text);
+        j = nest(text) < 512 ? jload(text) : null; // PHP reads JSON nested at most 511 levels
       } catch {
         // refused below
       }
@@ -596,44 +704,76 @@ export class Toklex {
         ins = m[2] === '+';
       } else {
         const c = unname(strip(m[1]));
-        meta[this.dk.get(c) ?? c] = this.read(m[2], c);
+        set(meta, this.dk.get(c) ?? c, this.read(m[2], c));
       }
     }
-    const rows: Obj[] = [];
+    let rows: Obj[] = [];
     if (l.length > 1) {
-      let cols: string[];
-      let grid: string[][];
+      // the work a reply asks for is counted as it is spent, so a short forged reply is refused before it costs much (spec 11)
+      let left = MAX_CELLS;
+      const spend = (cost: number) => {
+        if ((left -= cost) < 0) {
+          throw new ToklexError(`Toklex: a reply of more than ${MAX_CELLS} cells is refused`);
+        }
+      };
       const n = /^\[([0-9]+)\]( [^\n]*)?$/.exec(l[1]);
       if (n) {
-        const cnt = Number(n[1]);
+        const cnt = n[1].length <= 9 ? Number(n[1]) : MAX_RECORDS + 1;
         if (cnt > MAX_RECORDS) {
           throw new ToklexError(`Toklex: a reply of more than ${MAX_RECORDS} records is refused`);
         }
-        // each column line expands to N cells, so a short forged reply could otherwise claim gigabytes
         if (cnt * (l.length - 2) > MAX_CELLS) {
-          throw new ToklexError(`Toklex: a reply of more than ${MAX_CELLS} cells is refused`);
+          spend(MAX_CELLS + 1);
         }
-        cols = [];
-        grid = Array.from({ length: cnt }, () => [] as string[]);
-        l.slice(2).forEach((line, i) => {
+        rows = Array.from({ length: cnt }, () => ({}));
+        for (const line of l.slice(2)) {
           const at = line.indexOf(':');
-          cols.push(at < 0 ? line : line.slice(0, at));
-          expand(at < 0 ? '' : line.slice(at + 1), cnt).forEach((cell, r) => {
-            grid[r][i] = cell;
-          });
-        });
+          const [keys, code, cost] = this.column(strip(at < 0 ? line : line.slice(0, at)));
+          spend(cnt * cost);
+          let r = 0;
+          for (const [t, k, step] of items(at < 0 ? '' : line.slice(at + 1), cnt)) {
+            if (t === null) { // a date sequence from day k
+              for (; r < cnt; r++) {
+                Toklex.put(rows[r], keys, civilFromDays(k + r * step));
+              }
+              break;
+            }
+            spend(k * extra(t));
+            const v = this.read(t, code);
+            for (let i = 0; i < k; i++, r++) { // rows never share a list
+              Toklex.put(rows[r], keys, i && Array.isArray(v) ? structuredClone(v) : v);
+            }
+          }
+          for (; r < cnt; r++) {
+            Toklex.put(rows[r], keys, null);
+          }
+        }
       } else {
-        cols = l[1] === '' ? [] : l[1].split('|');
-        grid = l.slice(2).map((line) => line.split('|'));
-      }
-      const paths = cols.map((c) => strip(c).split('.').map(unname));
-      for (const cells of grid) {
-        const row: Obj = {};
-        paths.forEach((segs, i) => this.put(row, segs, this.read(cells[i] ?? '', segs[segs.length - 1])));
-        rows.push(row);
+        const cols = l[1] === '' ? [] : l[1].split('|').map((c) => this.column(strip(c)));
+        for (const line of l.slice(2)) {
+          const cells = line.split('|');
+          const row: Obj = {};
+          cols.forEach(([keys, code, cost], i) => {
+            spend(cost + extra(cells[i] ?? ''));
+            Toklex.put(row, keys, this.read(cells[i] ?? '', code));
+          });
+          rows.push(row);
+        }
       }
     }
     return { schema: h[1], version: h[2], instructions: ins, meta, rows };
+  }
+
+  /**
+   * A written column name as [the keys of its nested path, the code of its last name, the cost of one of its cells].
+   * A cell costs 1 and each name before the last adds 8. Throws ToklexError on a path of more than 64 names.
+   */
+  private column(written: string): [string[], string, number] {
+    if (written.split('.').length > MAX_DEPTH) {
+      throw new ToklexError(`Toklex: a column path of more than ${MAX_DEPTH} names is refused`);
+    }
+    const segs = written.split('.').map(unname);
+    return [segs.map((s) => this.dk.get(s) ?? s), segs[segs.length - 1], 8 * segs.length - 7];
   }
 
   /**
@@ -696,16 +836,15 @@ export class Toklex {
     return this.style() === 'plain' && (this.s.instructions_at ?? 'reply') === 'reply' && Object.keys(this.s.instructions ?? {}).length > 0;
   }
 
-  private header(meta: Obj, instructions = true): string {
+  private header(meta: Dict, instructions = true): string {
     const ins = this.s.instructions ?? {};
     let h = '';
     for (const [n, b] of this.inReply() && instructions ? Object.entries(ins) : []) {
       h += `${n}: ` + (/[\r\n]/.test(b) ? quote(b) : b) + '\n';
     }
     h += `~${this.s.id}@${this.v}` + (Object.keys(ins).length && this.style() === 'coded' ? ' i:+' : '');
-    for (const [k, v0] of Object.entries(meta)) {
+    for (const [k, v] of meta) {
       const c = this.kf.get(k) ?? u8(k);
-      const v = val(v0);
       const t = typeof v === 'object' && v !== null ? quote(this.js(v, true, c)) : this.cell(v, c, true);
       if (t !== '') {
         h += ' ' + this.label(name(c, true), c) + ':' + t;
@@ -724,22 +863,21 @@ export class Toklex {
     const ins = this.s.instructions ?? {};
     const o: [string, string][] = [['toklex', '"off"'], ['schema', jstr(`${this.s.id}@${this.v}`)]];
     if (Object.keys(ins).length && instructions && (this.style() === 'coded' || this.inReply())) {
-      o.push(['instructions', this.js(ins, false, null, true)]);
+      o.push(['instructions', this.js(new Map(Object.entries(ins)), false, null, true)]);
     }
     for (const [k, v] of tail) {
-      o.push([k, k === 'rows' ? '[' + (v as Obj[]).map((r) => this.js(r, false, null, true)).join(',') + ']' : this.js(v, false, null, k === 'meta')]);
+      o.push([k, k === 'rows' ? '[' + (v as Dict[]).map((r) => this.js(r, false, null, true)).join(',') + ']' : this.js(v, false, null, k === 'meta')]);
     }
     return '{' + o.map(([k, t]) => jstr(k) + ':' + t).join(',') + '}';
   }
 
-  /** One record as [dotted column, [code of the last segment, value]]. A non-empty object expands, anything else is a cell. */
-  private flat(row: Obj, path = ''): Map<string, [string, unknown]> {
+  /** One record as [dotted column, [code of the last segment, value]]. A non-empty map expands, anything else is a cell. */
+  private flat(row: Dict, path = ''): Map<string, [string, unknown]> {
     const out = new Map<string, [string, unknown]>();
-    for (const [k, v0] of entries(row)) {
+    for (const [k, v] of row) {
       const c = this.kf.get(k) ?? u8(k);
       const p = path === '' ? name(c) : path + '.' + name(c);
-      const v = val(v0);
-      if (isObj(v) && entries(v).length) {
+      if (v instanceof Map && v.size && !listlike(v.keys())) {
         for (const [q, x] of this.flat(v, p)) {
           if (!out.has(q)) {
             out.set(q, x); // a nested column keeps the cell it has, as PHP's += does
@@ -753,8 +891,7 @@ export class Toklex {
   }
 
   /** One cell. hdr adds the header's two quote triggers, any whitespace and a double quote. */
-  private cell(v0: unknown, c: string, hdr = false): string {
-    const v = val(v0);
+  private cell(v: unknown, c: string, hdr = false): string {
     if (v === null || v === undefined) {
       return '';
     }
@@ -782,19 +919,20 @@ export class Toklex {
     return q ? quote(s) : s;
   }
 
-  /** JSON text. coded shortens keys and codes strings and numbers by the key they sit under. Lists pass their key down. An empty object is [] as an empty PHP array is, unless obj asks for an object. */
-  private js(x0: unknown, coded: boolean, k: string | null = null, obj = false): string {
-    const x = val(x0);
-    if (Array.isArray(x)) {
-      return '[' + x.map((e) => (val(e) === undefined ? 'null' : this.js(e, coded, k))).join(',') + ']';
+  /**
+   * JSON text. coded shortens keys and codes strings and numbers by the key they sit under. Lists pass their key down.
+   * A map with the keys 0, 1, ... in order, the empty one too, is a list as that PHP array is, unless obj asks for an object.
+   */
+  private js(x: unknown, coded: boolean, k: string | null = null, obj = false): string {
+    if (x instanceof Map && !obj && listlike(x.keys())) {
+      x = [...x.values()];
     }
-    if (isObj(x)) {
-      const es = entries(x);
-      if (!es.length && !obj) {
-        return '[]';
-      }
+    if (Array.isArray(x)) {
+      return '[' + x.map((e) => this.js(e, coded, k)).join(',') + ']';
+    }
+    if (x instanceof Map) {
       // plain scales no member of an object (spec 6.3)
-      return '{' + es.map(([n, e]) => {
+      return '{' + [...(x as Dict)].map(([n, e]) => {
         const c = coded ? this.kf.get(n) ?? n : n;
         return jstr(c) + ':' + this.js(e, coded, this.style() === 'coded' ? c : '');
       }).join(',') + '}';
@@ -836,7 +974,7 @@ export class Toklex {
     if (t === 'true' || t === 'false') {
       return t === 'true';
     }
-    if (t[0] === '[') {
+    if (t[0] === '[' && nest(t) <= MAX_DEPTH) { // a deeper JSON array cell stays text, as in PHP
       try {
         const j = jload(t);
         if (Array.isArray(j)) {
@@ -850,6 +988,7 @@ export class Toklex {
   }
 
   /** Full keys, full values and descaled numbers inside decoded JSON. */
+  // PHP reads {"0":..,"1":..} as a list, but JSON.parse has put such keys in order already, so a map stays a map here
   private dec(x: unknown, k: string | null): unknown {
     if (Array.isArray(x)) {
       return x.map((e) => this.dec(e, k));
@@ -860,38 +999,37 @@ export class Toklex {
     if (typeof x === 'string') {
       return (k !== null && this.dv.get(k)?.get(x)) ?? x;
     }
-    const m = typeof x === 'number' && k !== null ? this.sc.get(k) : undefined;
-    return m ? (x as number) / m : x;
+    const m = isNum(x) && k !== null ? this.sc.get(k) : undefined;
+    return m ? Number(x) / m : x;
   }
 
   /** One cell into its nested place. A scalar parent gives way to a nested value, but a null never replaces it, and a null parent cell never wipes the object its nested columns built. */
-  private put(row: Obj, segs: string[], value: unknown): void {
+  private static put(row: Obj, keys: string[], value: unknown): void {
     let cont: Obj | null = null;
     let key = '';
-    for (const sg of segs) {
+    for (const kk of keys) {
       let cur: unknown = cont === null ? row : cont[key];
       if (Array.isArray(cur)) {
         // a list is an array to PHP, so a nested column adds its key to it
         cur = Object.fromEntries(cur.map((x, i) => [String(i), x]));
-        cont![key] = cur;
+        set(cont!, key, cur);
       } else if (!isObj(cur)) {
         if (value === null && cur !== null && cur !== undefined) {
           return;
         }
         cur = {};
-        cont![key] = cur;
+        set(cont!, key, cur);
       }
       const o = cur as Obj;
-      const kk = this.dk.get(sg) ?? sg;
       if (!own(o, kk)) {
-        o[kk] = null;
+        set(o, kk, null);
       }
       cont = o;
       key = kk;
     }
     const last = cont![key];
     if (value !== null || !(isObj(last) || Array.isArray(last))) {
-      cont![key] = value;
+      set(cont!, key, value);
     }
   }
 

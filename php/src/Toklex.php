@@ -12,7 +12,9 @@ final class Toklex
 
     private const MODES = ['off', 'safe', 'dense'];
     private const JF = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_LINE_TERMINATORS | JSON_INVALID_UTF8_SUBSTITUTE;
-    private const NUM = '/^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/D';
+    // patterns name their characters, because PCRE takes \s and \d from the locale and a single-byte locale counts NBSP as space
+    private const NUM = '/^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/D';
+    private const WS = '\t\n\x0b\f\r ';
     private const BAR = '\\' . 'u007c';
     private const DENSE_LINE = 'One line per column: name:v1|v2|… x*K is x repeated K times, start+Nd is a date every N days, an empty cell is null.';
 
@@ -40,7 +42,9 @@ Pick a mode for one call with the optional argument toklex_mode. The values are 
 TXT;
 
     private const MAX_RECORDS = 100000;
-    private const MAX_CELLS = 1000000;
+    private const MAX_CELLS = 500000; // the cost of a reply in cells, about 60 MB in PHP at the limit (spec 11)
+    private const MAX_DEPTH = 64;
+    private const LAST_DAY = 2932896; // 9999-12-31 as days since 1970-01-01
     private const AUTO_MIN = 10;
     // characters that would break a column line or a header, written as \uXXXX (spec 6.1)
     private const NAME_ESC = ['\\' => '\u005c', '|' => '\u007c', ':' => '\u003a', '÷' => '\u00f7',
@@ -170,14 +174,14 @@ TXT;
             if (!$plain) {
                 $d = isset($t['description']) ? $t['description'] . "\n\n" . $contract : $contract;
                 if (preg_match_all('/./su', $d) > 2048) {
-                    $warn("Toklex: description of tool '{$t['name']}' is over 2048 characters, a client may cut the contract line");
+                    $warn('Toklex: description of tool \'' . ($t['name'] ?? '') . '\' is over 2048 characters, a client may cut the contract line');
                 }
                 $t['description'] = $d;
             }
             // a tool with an outputSchema must return structuredContent, and a Toklex reply is one text block (spec 9)
-            if (isset($t['outputSchema'])) {
+            if (array_key_exists('outputSchema', $t)) {
                 unset($t['outputSchema']);
-                $warn("Toklex: tool '{$t['name']}' loses its outputSchema, a Toklex reply carries no structuredContent");
+                $warn('Toklex: tool \'' . ($t['name'] ?? '') . '\' loses its outputSchema, a Toklex reply carries no structuredContent');
             }
             $in = (array)($t['inputSchema'] ?? ['type' => 'object']);
             $in['properties'] = (array)($in['properties'] ?? []) + ['toklex_mode' => [
@@ -234,7 +238,8 @@ TXT;
             $c = (string)($this->kf[$k] ?? self::u8((string)$k));
             in_array($c, $this->style() === 'plain' ? ['error'] : ['i', 'e'], true) && throw new \InvalidArgumentException("Toklex: meta key $c is reserved");
         }
-        $rows = array_map(self::val(...), array_values($rows));
+        $rows = array_map(fn($r) => self::norm($r, 0), array_values($rows));
+        $meta = array_map(fn($v) => self::norm($v, 1), $meta);
         foreach ($rows as $i => $r) {
             is_array($r) || is_object($r) || throw new \InvalidArgumentException("Toklex: record $i is " . get_debug_type($r) . ', not a record. Pass a list of records, such as [$row] for one record.');
         }
@@ -306,61 +311,64 @@ TXT;
         // instruction lines start with their name, the header with ~, so a reply that left them out starts with the header
         $k = $this->inReply() && !str_starts_with($text, '~') ? count($this->s['instructions']) : 0;
         $l = array_slice(explode("\n", $text), $k);
-        $un = fn(string $c) => self::unname($plain ? preg_replace('/\(÷\d+\)$/', '', $c) : $c);
-        preg_match('/^~([^@ ]+)@(\S+)/', $l[0] ?? '', $h) || throw new \InvalidArgumentException('Toklex: the reply has no header line');
-        preg_match_all('/ ([^\s:]+):("(?:[^"\\\\]|\\\\.)*"|\S*)/', $l[0], $m, PREG_SET_ORDER);
+        $label = fn(string $c) => $plain ? preg_replace('/\(÷[0-9]+\)$/', '', $c) : $c;
+        preg_match('/^~([^@ ]+)@([^' . self::WS . ']+)/', $l[0] ?? '', $h) || throw new \InvalidArgumentException('Toklex: the reply has no header line');
+        preg_match_all('/ ([^' . self::WS . ':]+):("(?:[^"\\\\]|\\\\.)*"|[^' . self::WS . ']*)/', $l[0], $m, PREG_SET_ORDER);
         $ins = $k > 0;
         $meta = [];
         foreach ($m as [, $c, $raw]) {
             if ($c === 'i' && !$plain) {
                 $ins = $raw === '+';
             } else {
-                $c = $un($c);
+                $c = self::unname($label($c));
                 $meta[$this->dk[$c] ?? $c] = $this->read($raw, $c);
             }
         }
         $rows = [];
         if (isset($l[1])) {
-            if (preg_match('/^\[(\d+)\]( .*)?$/D', $l[1], $n)) {
-                $cols = [];
-                (int)$n[1] > self::MAX_RECORDS && throw new \InvalidArgumentException('Toklex: a reply of more than ' . self::MAX_RECORDS . ' records is refused');
-                // each column line expands to N cells, so a short forged reply could otherwise claim gigabytes
-                (int)$n[1] * (count($l) - 2) > self::MAX_CELLS && throw new \InvalidArgumentException('Toklex: a reply of more than ' . self::MAX_CELLS . ' cells is refused');
-                $grid = array_fill(0, (int)$n[1], []);
-                foreach (array_slice($l, 2) as $i => $line) {
-                    [$cols[$i], $items] = explode(':', $line, 2) + [1 => ''];
-                    foreach (self::expand($items, (int)$n[1]) as $r => $cell) {
-                        $grid[$r][$i] = $cell;
+            // the work a reply asks for is counted as it is spent, so a short forged reply is refused before it costs much (spec 11)
+            $left = self::MAX_CELLS;
+            $spend = static function (int $n) use (&$left): void {
+                ($left -= $n) < 0 && throw new \InvalidArgumentException('Toklex: a reply of more than ' . self::MAX_CELLS . ' cells is refused');
+            };
+            if (preg_match('/^\[([0-9]+)\]( .*)?$/D', $l[1], $n)) {
+                $count = strlen($n[1]) > 9 ? PHP_INT_MAX : (int)$n[1];
+                $count > self::MAX_RECORDS && throw new \InvalidArgumentException('Toklex: a reply of more than ' . self::MAX_RECORDS . ' records is refused');
+                $count * (count($l) - 2) > self::MAX_CELLS && $spend(PHP_INT_MAX);
+                $rows = array_fill(0, $count, []);
+                foreach (array_slice($l, 2) as $line) {
+                    [$name, $items] = explode(':', $line, 2) + [1 => ''];
+                    [$keys, $code, $cost] = $this->column($label($name));
+                    $spend($count * $cost);
+                    $r = 0;
+                    foreach (self::items($items, $count) as [$t, $k, $step]) {
+                        if ($t === null) { // a date sequence from day $k
+                            for (; $r < $count; $r++) {
+                                self::put($rows[$r], $keys, self::date($k + $r * $step));
+                            }
+                            break;
+                        }
+                        $spend($k * self::extra($t));
+                        $v = $this->read($t, $code);
+                        for ($e = $r + $k; $r < $e; $r++) {
+                            self::put($rows[$r], $keys, $v);
+                        }
+                    }
+                    for (; $r < $count; $r++) {
+                        self::put($rows[$r], $keys, null);
                     }
                 }
             } else {
-                $cols = $l[1] === '' ? [] : explode('|', $l[1]);
-                $grid = array_map(fn($line) => explode('|', $line), array_slice($l, 2));
-            }
-            foreach ($grid as $cells) {
-                $row = [];
-                foreach ($cols as $i => $col) {
-                    $segs = array_map(self::unname(...), explode('.', $plain ? preg_replace('/\(÷\d+\)$/', '', $col) : $col));
-                    $val = $this->read($cells[$i] ?? '', end($segs));
-                    $ref = &$row;
-                    foreach ($segs as $sg) {
-                        if (!is_array($ref)) {
-                            // a scalar parent gives way to a nested value, but a null never replaces it
-                            if ($val === null && $ref !== null) {
-                                unset($ref);
-                                continue 2;
-                            }
-                            $ref = [];
-                        }
-                        $ref = &$ref[$this->dk[$sg] ?? $sg];
+                $cols = $l[1] === '' ? [] : array_map(fn($c) => $this->column($label($c)), explode('|', $l[1]));
+                foreach (array_slice($l, 2) as $line) {
+                    $cells = explode('|', $line);
+                    $row = [];
+                    foreach ($cols as $i => [$keys, $code, $cost]) {
+                        $spend($cost + self::extra($cells[$i] ?? ''));
+                        self::put($row, $keys, $this->read($cells[$i] ?? '', $code));
                     }
-                    // a null parent cell never wipes the object its nested columns built
-                    if ($val !== null || !is_array($ref)) {
-                        $ref = $val;
-                    }
-                    unset($ref);
+                    $rows[] = $row;
                 }
-                $rows[] = $row;
             }
         }
         return ['schema' => $h[1], 'version' => $h[2], 'instructions' => $ins, 'meta' => $meta, 'rows' => $rows];
@@ -438,12 +446,10 @@ TXT;
     {
         $t = [];
         foreach ($v as $x) {
-            $d = is_string($x) && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $x)
-                ? \DateTimeImmutable::createFromFormat('!Y-m-d', $x, new \DateTimeZone('UTC')) : false;
-            if (!$d || $d->format('Y-m-d') !== $x) {
+            if (($d = self::day($x)) === null) {
                 return null;
             }
-            $t[] = intdiv($d->getTimestamp(), 86400);
+            $t[] = $d;
         }
         $step = ($t[1] ?? 0) - $t[0];
         foreach ($t as $i => $d) {
@@ -454,22 +460,100 @@ TXT;
         return count($t) >= 3 && $step > 0 ? "{$v[0]}+{$step}d" : null;
     }
 
-    /** The N cell texts of one dense column line. A date sequence gives quoted dates, so they stay literals. */
-    private static function expand(string $items, int $n): array
+    /** The day number of a valid ISO date text such as 2026-07-01, else null. */
+    private static function day(mixed $x): ?int
     {
-        if (preg_match('/^(\d{4}-\d{2}-\d{2})\+(\d+)d$/D', $items, $m)) {
-            $d = new \DateTimeImmutable($m[1], new \DateTimeZone('UTC'));
-            return array_map(fn($i) => '"' . $d->modify('+' . $i * (int)$m[2] . ' days')->format('Y-m-d') . '"', array_keys(array_fill(0, $n, 0)));
+        if (!is_string($x) || !preg_match('/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/D', $x, $m) || $m[2] < 1 || $m[2] > 12 || $m[3] < 1) {
+            return null;
+        }
+        $n = self::civil((int)$m[1], (int)$m[2], (int)$m[3]);
+        return self::date($n) === $x ? $n : null;
+    }
+
+    /** Days since 1970-01-01 in the proleptic Gregorian calendar (days_from_civil by H. Hinnant, with floor division). A day past the end of a month runs on into the next one. */
+    private static function civil(int $y, int $m, int $d): int
+    {
+        $y -= $m <= 2 ? 1 : 0;
+        $era = (int)floor($y / 400);
+        $yoe = $y - $era * 400;
+        $doe = $yoe * 365 + intdiv($yoe, 4) - intdiv($yoe, 100) + intdiv(153 * ($m + ($m > 2 ? -3 : 9)) + 2, 5) + $d - 1;
+        return $era * 146097 + $doe - 719468;
+    }
+
+    /** The ISO date of a day number, the inverse of civil(). */
+    private static function date(int $z): string
+    {
+        $z += 719468;
+        $era = (int)floor($z / 146097);
+        $doe = $z - $era * 146097;
+        $yoe = intdiv($doe - intdiv($doe, 1460) + intdiv($doe, 36524) - intdiv($doe, 146096), 365);
+        $doy = $doe - (365 * $yoe + intdiv($yoe, 4) - intdiv($yoe, 100));
+        $mp = intdiv(5 * $doy + 2, 153);
+        $m = $mp + ($mp < 10 ? 3 : -9);
+        $d = $doy - intdiv(153 * $mp + 2, 5) + 1;
+        // concatenation, because a sprintf result keeps its spare buffer and a date sequence makes many of them
+        return str_pad((string)($yoe + $era * 400 + ($m <= 2 ? 1 : 0)), 4, '0', STR_PAD_LEFT) . ($m < 10 ? '-0' : '-') . $m . ($d < 10 ? '-0' : '-') . $d;
+    }
+
+    /**
+     * The items of a dense column line as [cell text, K] runs cut at N records, or one [null, first day, step] for a date sequence.
+     * @throws \InvalidArgumentException on a date sequence that starts at an invalid date or runs past 9999-12-31
+     */
+    private static function items(string $items, int $n): array
+    {
+        if (preg_match('/^([0-9]{4}-[0-9]{2}-[0-9]{2})\+([0-9]+)d$/D', $items, $m)) {
+            ($d = self::day($m[1])) === null && throw new \InvalidArgumentException("Toklex: a date sequence starts at the invalid date {$m[1]}");
+            $step = strlen($m[2]) > 7 ? self::LAST_DAY : (int)$m[2];
+            $n > 1 && $d + ($n - 1) * $step > self::LAST_DAY && throw new \InvalidArgumentException('Toklex: a date sequence runs past 9999-12-31');
+            return [[null, $d, $step]];
         }
         $o = [];
         foreach (explode('|', $items) as $it) {
-            if (count($o) >= $n) {
+            if ($n <= 0) {
                 break;
             }
-            $r = preg_match('/^(.*)\*(\d+)$/Ds', $it, $m);
-            array_push($o, ...array_fill(0, $r ? min((int)$m[2], $n - count($o)) : 1, $r ? $m[1] : $it));
+            $r = preg_match('/^(.*)\*([0-9]+)$/Ds', $it, $m);
+            $k = $r ? min(strlen($m[2]) > 9 ? PHP_INT_MAX : (int)$m[2], $n) : 1;
+            $o[] = [$r ? $m[1] : $it, $k, 0];
+            $n -= $k;
         }
         return $o;
+    }
+
+    /** The cost a JSON array cell adds to its cell, read from its text: 1 per comma and 8 per [ or {, as a nested list or map costs about 8 cells. */
+    private static function extra(string $t): int
+    {
+        return $t !== '' && $t[0] === '[' ? substr_count($t, ',') + 8 * (substr_count($t, '[') + substr_count($t, '{')) : 0;
+    }
+
+    /**
+     * A written column name as [the keys of its nested path, the code of its last name, the cost of one of its cells].
+     * A cell costs 1 and each name before the last adds 8, the cost of the nested map it builds.
+     * @throws \InvalidArgumentException when the path has more than MAX_DEPTH names
+     */
+    private function column(string $name): array
+    {
+        substr_count($name, '.') >= self::MAX_DEPTH && throw new \InvalidArgumentException('Toklex: a column path of more than ' . self::MAX_DEPTH . ' names is refused');
+        $segs = array_map(self::unname(...), explode('.', $name));
+        return [array_map(fn($s) => $this->dk[$s] ?? $s, $segs), end($segs), 8 * count($segs) - 7];
+    }
+
+    /** One cell into its nested place. A scalar parent gives way to a nested value, but a null never replaces it, and a null parent cell never wipes the object its nested columns built. */
+    private static function put(array &$row, array $keys, mixed $val): void
+    {
+        $ref = &$row;
+        foreach ($keys as $k) {
+            if (!is_array($ref)) {
+                if ($val === null && $ref !== null) {
+                    return;
+                }
+                $ref = [];
+            }
+            $ref = &$ref[$k];
+        }
+        if ($val !== null || !is_array($ref)) {
+            $ref = $val;
+        }
     }
 
     private function header(array $meta, bool $instructions = true): string
@@ -482,7 +566,6 @@ TXT;
         $h .= "~{$this->s['id']}@{$this->v}" . ($ins && $this->style() === 'coded' ? ' i:+' : '');
         foreach ($meta as $k => $v) {
             $c = (string)($this->kf[$k] ?? self::u8((string)$k));
-            $v = self::val($v);
             $t = is_array($v) || is_object($v) ? self::quote($this->js($v, true, $c)) : $this->cell($v, $c, true);
             $t === '' || $h .= ' ' . $this->label(self::name($c, true), $c) . ":$t";
         }
@@ -529,7 +612,6 @@ TXT;
         foreach ((array)$row as $k => $v) {
             $c = (string)($this->kf[$k] ?? self::u8((string)$k));
             $p = $path === '' ? self::name($c) : "$path." . self::name($c);
-            $v = self::val($v);
             $v = is_object($v) ? (array)$v : $v;
             if (is_array($v) && $v && !array_is_list($v)) {
                 $out += $this->flat($v, $p);
@@ -543,7 +625,6 @@ TXT;
     /** One cell. $hdr adds the header's two quote triggers, any whitespace and a double quote. */
     private function cell(mixed $v, string $c, bool $hdr = false): string
     {
-        $v = self::val($v);
         if ($v === null) {
             return '';
         }
@@ -552,7 +633,7 @@ TXT;
         }
         $scaled = isset($this->sc[$c]);
         // a database driver hands numbers over as strings, so a plain decimal in a scaled field is that number, scaled on its digits with no float step (spec 6.3)
-        if ($scaled && is_string($v) && preg_match('/^-?(0|[1-9]\d*)(\.\d+)?$/D', $v)) {
+        if ($scaled && is_string($v) && preg_match('/^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/D', $v)) {
             return self::scaled($v, self::num($this->sc[$c], null));
         }
         if (is_int($v) || is_float($v)) {
@@ -567,14 +648,13 @@ TXT;
         }
         $quote = $scaled || $v === '' || preg_match('/^["\[{]|[|*\n\r]/', $v) || isset($this->dv[$c][$v])
             || preg_match(self::NUM, $v) || in_array($v, ['true', 'false', 'null'], true)
-            || preg_match('/^\d{4}-\d{2}-\d{2}\+\d+d$/D', $v) || ($hdr && preg_match('/[\s"]/', $v));
+            || preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}\+[0-9]+d$/D', $v) || ($hdr && preg_match('/[' . self::WS . '"]/', $v));
         return $quote ? self::quote($v) : $v;
     }
 
     /** JSON text. $coded shortens keys and codes strings and numbers by the key they sit under. Lists pass their key down. */
     private function js(mixed $x, bool $coded, ?string $k = null): string
     {
-        $x = self::val($x);
         if (is_array($x) || is_object($x)) {
             if (is_array($x) && array_is_list($x)) {
                 return '[' . implode(',', array_map(fn($e) => $this->js($e, $coded, $k), $x)) . ']';
@@ -612,7 +692,7 @@ TXT;
         }
         // shortest digits that read back as the same float, so php.ini serialize_precision never matters
         for ($p = 0; (float)($s = sprintf("%.{$p}e", $x)) !== $x && $p < 16; $p++);
-        if (!preg_match('/^(-?)(\d+)(?:\.(\d+))?e([+-]?\d+)$/i', $s, $p)) {
+        if (!preg_match('/^(-?)([0-9]+)(?:\.([0-9]+))?e([+-]?[0-9]+)$/i', $s, $p)) {
             return $s;
         }
         [, $sign, $i, $f, $e] = $p;
@@ -645,21 +725,52 @@ TXT;
     }
 
     /**
-     * A value as JSON would carry it (spec 11): a date-time as ISO 8601 text, an enum case by its value or name,
-     * a JsonSerializable by what it returns and any other object as a stdClass of its public properties.
+     * A value with only scalars, arrays and stdClass left in it (spec 11). A list or map that sits MAX_DEPTH levels
+     * below the record, or deeper, is null, and so is an object where it repeats inside itself.
      */
-    private static function val(mixed $v): mixed
+    private static function norm(mixed $v, int $level, array $on = []): mixed
     {
-        for ($i = 0; is_object($v) && !$v instanceof \stdClass && $i < 8; $i++) {
+        if (is_object($v)) {
+            $id = spl_object_id($v);
+            if (isset($on[$id])) {
+                return null;
+            }
+            $on[$id] = true;
+            $v = self::val($v);
+        }
+        if (!is_array($v) && !is_object($v)) {
+            return $v === null || is_scalar($v) ? $v : null; // a resource
+        }
+        if ($level >= self::MAX_DEPTH) {
+            return null;
+        }
+        $o = [];
+        foreach ((array)$v as $k => $x) {
+            $o[$k] = self::norm($x, $level + 1, $on);
+        }
+        return is_object($v) ? (object)$o : $o;
+    }
+
+    /**
+     * An object as JSON would carry it: a date-time as ISO 8601 text, an enum case by its value or name, a JsonSerializable
+     * by what it returns, an ArrayObject by its array, a closure as null, any other Stringable as its text and any other
+     * object as a stdClass of its public properties. A chain of more than 8 JsonSerializable steps is null.
+     */
+    private static function val(object $v): mixed
+    {
+        for ($i = 0; $i < 8 && is_object($v) && !$v instanceof \stdClass; $i++) {
             $v = match (true) {
                 $v instanceof \DateTimeInterface => self::iso($v),
                 $v instanceof \BackedEnum => $v->value,
                 $v instanceof \UnitEnum => $v->name,
                 $v instanceof \JsonSerializable => $v->jsonSerialize(),
+                $v instanceof \ArrayObject, $v instanceof \ArrayIterator => $v->getArrayCopy(),
+                $v instanceof \Closure => null,
+                $v instanceof \Stringable => (string)$v,
                 default => (object)get_object_vars($v),
             };
         }
-        return is_object($v) && !$v instanceof \stdClass ? (object)get_object_vars($v) : $v;
+        return is_object($v) && !$v instanceof \stdClass ? null : $v;
     }
 
     /** The date alone at midnight, so that a date column stays a date sequence. Otherwise the time, a fraction when there is one, and the offset. */
@@ -701,7 +812,7 @@ TXT;
         if ($t === 'true' || $t === 'false') {
             return $t === 'true';
         }
-        if ($t[0] === '[' && is_array($j = json_decode($t, true))) {
+        if ($t[0] === '[' && is_array($j = json_decode($t, true, self::MAX_DEPTH + 1))) {
             return $this->dec($j, $c);
         }
         return $t;
@@ -728,7 +839,7 @@ TXT;
     /** A code that a cell, a column name or a header value could not carry as plain text. */
     private static function badCode(string $c): bool
     {
-        return $c === '' || preg_match('/[|*:\s"]|^[\[{]/', $c) || preg_match(self::NUM, $c) || in_array($c, ['true', 'false', 'null'], true);
+        return $c === '' || preg_match('/[|*:"' . self::WS . ']|^[\[{]/', $c) || preg_match(self::NUM, $c) || in_array($c, ['true', 'false', 'null'], true);
     }
 
     private static function check(array $s): void
@@ -760,7 +871,7 @@ TXT;
             foreach ($map as $c => $full) {
                 is_string($full) || $fail("values.$f.$c must be a string");
                 self::badCode((string)$c) && $fail("value code $c in values.$f is not a plain token");
-                preg_match('/^\d{4}-\d{2}-\d{2}\+\d+d$/D', (string)$c) && $fail("value code $c in values.$f has the shape of a date sequence");
+                preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}\+[0-9]+d$/D', (string)$c) && $fail("value code $c in values.$f has the shape of a date sequence");
             }
             count(array_unique($map)) === count($map) || $fail("a full value occurs twice in values.$f");
         }

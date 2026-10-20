@@ -3,6 +3,7 @@
 """Toklex for Python: compact MCP tool results. A port of php/src/Toklex.php that passes spec/fixtures."""
 from __future__ import annotations
 
+import copy
 import dataclasses
 import datetime as _dt
 import decimal
@@ -48,7 +49,9 @@ _PLAIN_MODES_TEXT = (
     "Pick a mode for one call with the optional argument toklex_mode. The values are off, safe and dense. If you leave it out or send another value, the tool's default mode applies."
 )
 _MAX_RECORDS = 100000
-_MAX_CELLS = 1000000
+_MAX_CELLS = 500000  # the cost of a reply in cells (spec 11)
+_MAX_DEPTH = 64
+_LAST_DAY = 2932896  # 9999-12-31 as days since 1970-01-01
 _AUTO_MIN = 10
 # characters that would break a column line or a header, written as \uXXXX (spec 6.1)
 _NAME_ESC = {"\\": "\\u005c", "|": "\\u007c", ":": "\\u003a", "÷": "\\u00f7",
@@ -95,9 +98,44 @@ def _no_const(c: str) -> Any:
     raise ValueError(c)
 
 
+def _big(s: str) -> Any:
+    """An integer as PHP reads it: a float when it does not fit in 64 bits. Python also refuses more than 4300 digits."""
+    v = int(s) if len(s) <= 25 else None
+    return v if v is not None and -2 ** 63 <= v < 2 ** 63 else float(s)
+
+
 def _jload(t: str) -> Any:
     """Strict JSON as PHP reads it: no NaN or Infinity. Raises ValueError."""
-    return json.loads(t, parse_constant=_no_const)
+    return json.loads(t, parse_constant=_no_const, parse_int=_big)
+
+
+def _nest(t: str) -> int:
+    """How deep the lists and maps of a JSON text go, outside its strings."""
+    if t.count("[") + t.count("{") <= _MAX_DEPTH:
+        return t.count("[") + t.count("{")
+    depth = top = 0
+    in_str = esc = False
+    for ch in t:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch in "[{":
+            depth += 1
+            top = max(top, depth)
+        elif ch in "]}":
+            depth -= 1
+    return top
+
+
+def _listlike(d: dict) -> bool:
+    """True for a dict whose keys are 0, 1, ... in order, which PHP keeps as a list."""
+    return all(str(k) == str(i) for i, k in enumerate(d))
 
 
 def _jstr(s: str) -> str:
@@ -116,40 +154,58 @@ def _u8(s: str) -> str:
 
 
 def _iso(d: Any) -> str:
-    """The date alone at midnight, so that a date column stays a date sequence. Otherwise the time, a fraction when there is one, and the offset."""
+    """The date alone at midnight, so that a date column stays a date sequence. Otherwise the time, a fraction when there
+    is one, and the offset, +00:00 for a naive datetime, as PHP gives every date-time a zone."""
     if isinstance(d, _dt.datetime):
         if (d.hour, d.minute, d.second, d.microsecond) == (0, 0, 0, 0):
             return d.date().isoformat()
-        return d.isoformat()
+        return d.isoformat() + ("+00:00" if d.utcoffset() is None else "")
     return d.isoformat()
 
 
 def _val(v: Any) -> Any:
-    """A value as JSON would carry it (spec 11): a date-time as ISO 8601 text, an enum case by its value,
-    a Decimal as a number, a tuple as a list, a dataclass or any other object as the dict of its public attributes."""
+    """A value as JSON would carry it (spec 11): a date-time as ISO 8601 text, an enum case by its value, a Decimal as a
+    number, a tuple as a list, a function as None, a dataclass, a mapping or any other object as the dict of its public
+    attributes, and an object with none of these as its text. A chain of more than 8 conversions is None."""
     for _ in range(8):
-        if v is None or isinstance(v, (str, bool, int, float, dict, list)):
+        if v is None or isinstance(v, (str, bool, int, float, dict, list, decimal.Decimal)):
             return v
         if isinstance(v, (_dt.date, _dt.time)):
             return _iso(v)
         if isinstance(v, enum.Enum):
             v = v.value
-        elif isinstance(v, decimal.Decimal):
-            return v
         elif isinstance(v, tuple):
             return list(v)
-        elif isinstance(v, bytes):
-            return v.decode("utf-8", "replace")
+        elif isinstance(v, (bytes, bytearray)):
+            return bytes(v).decode("utf-8", "replace")
         elif hasattr(v, "model_dump"):
             v = v.model_dump()
         elif dataclasses.is_dataclass(v) and not isinstance(v, type):
             v = {f.name: getattr(v, f.name) for f in dataclasses.fields(v) if not f.name.startswith("_")}
         elif hasattr(v, "keys") and hasattr(v, "__getitem__"):
             v = {k: v[k] for k in v.keys()}
+        elif callable(v):
+            return None
         elif hasattr(v, "__dict__"):
             v = {k: x for k, x in vars(v).items() if not str(k).startswith("_")}
         else:
             return str(v)
+    return v if v is None or isinstance(v, (str, bool, int, float, dict, list, decimal.Decimal)) else None
+
+
+def _norm(v: Any, level: int, on: frozenset = frozenset()) -> Any:
+    """A value with only JSON types left in it (spec 11). A list or map that sits 64 levels below the record, or
+    deeper, is None, and so is a value where it repeats inside itself."""
+    if v is None or isinstance(v, (str, bool, int, float)):
+        return v
+    if id(v) in on:
+        return None
+    on = on | {id(v)}
+    v = _val(v)
+    if isinstance(v, dict):
+        return None if level >= _MAX_DEPTH else {k: _norm(x, level + 1, on) for k, x in v.items()}
+    if isinstance(v, list):
+        return None if level >= _MAX_DEPTH else [_norm(x, level + 1, on) for x in v]
     return v
 
 
@@ -227,9 +283,10 @@ def _bad_code(c: str) -> bool:
 
 
 def _days_from_civil(y: int, m: int, d: int) -> int:
-    """Days since 1970-01-01 in the proleptic Gregorian calendar. A day past the end of a month runs into the next one."""
+    """Days since 1970-01-01 in the proleptic Gregorian calendar (days_from_civil by H. Hinnant, with floor division).
+    A day past the end of a month runs on into the next one."""
     y -= m <= 2
-    era = (y if y >= 0 else y - 399) // 400
+    era = y // 400
     yoe = y - era * 400
     doy = (153 * (m + (-3 if m > 2 else 9)) + 2) // 5 + d - 1
     doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
@@ -238,7 +295,7 @@ def _days_from_civil(y: int, m: int, d: int) -> int:
 
 def _civil_from_days(z: int) -> str:
     z += 719468
-    era = (z if z >= 0 else z - 146096) // 146097
+    era = z // 146097
     doe = z - era * 146097
     yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
     doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
@@ -286,19 +343,33 @@ def _runs(cells: list) -> str:
     return "|".join(o)
 
 
-def _expand(items: str, n: int) -> list:
-    """The N cell texts of one dense column line. A date sequence gives quoted dates, so they stay literals."""
+def _items(items: str, n: int) -> list:
+    """The items of a dense column line as (cell text, K, 0) runs cut at N records, or one (None, first day, step) for a
+    date sequence. Raises ToklexError on a date sequence that starts at an invalid date or runs past 9999-12-31."""
     m = _SEQ.fullmatch(items)
-    if m and 1 <= int(m.group(2)) <= 12:
-        d0, step = _days_from_civil(int(m.group(1)), int(m.group(2)), int(m.group(3))), int(m.group(4))
-        return ['"' + _civil_from_days(d0 + i * step) + '"' for i in range(n)]
+    if m:
+        first = items[:10]
+        d = _day(first)
+        if d is None:
+            raise ToklexError(f"Toklex: a date sequence starts at the invalid date {first}")
+        step = int(m.group(4)) if len(m.group(4)) <= 7 else _LAST_DAY
+        if n > 1 and d + (n - 1) * step > _LAST_DAY:
+            raise ToklexError("Toklex: a date sequence runs past 9999-12-31")
+        return [(None, d, step)]
     o: list = []
     for it in items.split("|"):
-        if len(o) >= n:
+        if n <= 0:
             break
         r = re.fullmatch(r"(.*)\*([0-9]+)", it, re.S)
-        o.extend([r.group(1) if r else it] * (min(int(r.group(2)), n - len(o)) if r else 1))
+        k = min(int(r.group(2)) if len(r.group(2)) <= 9 else n, n) if r else 1
+        o.append((r.group(1) if r else it, k, 0))
+        n -= k
     return o
+
+
+def _extra(t: str) -> int:
+    """The cost a JSON array cell adds to its cell, read from its text: 1 per comma and 8 per [ or {."""
+    return t.count(",") + 8 * (t.count("[") + t.count("{")) if t.startswith("[") else 0
 
 
 def _same_list(d: Any) -> Any:
@@ -391,16 +462,17 @@ class Toklex:
         out = []
         for t in tools:
             t = dict(_val(t))
+            name = "" if t.get("name") is None else t["name"]
             if not plain:
                 d = t["description"] + "\n\n" + contract if t.get("description") is not None else contract
                 if len(d) > 2048:
-                    warn(f"Toklex: description of tool '{t.get('name')}' is over 2048 characters, a client may cut the contract line")
+                    warn(f"Toklex: description of tool '{name}' is over 2048 characters, a client may cut the contract line")
                 t["description"] = d
             # a tool with an outputSchema must return structuredContent, and a Toklex reply is one text block (spec 9)
             if "outputSchema" in t:
                 del t["outputSchema"]
-                warn(f"Toklex: tool '{t.get('name')}' loses its outputSchema, a Toklex reply carries no structuredContent")
-            inp = dict(_val(t.get("inputSchema") or {"type": "object"}))
+                warn(f"Toklex: tool '{name}' loses its outputSchema, a Toklex reply carries no structuredContent")
+            inp = dict(_val({"type": "object"} if t.get("inputSchema") is None else t["inputSchema"]))
             props = dict(_val(inp.get("properties") or {}))
             props.setdefault("toklex_mode", {"type": "string", "enum": list(_MODES), "description": "Reply format: off, safe or dense."})
             inp["properties"] = props
@@ -430,13 +502,13 @@ class Toklex:
     def encode(self, tool: str, rows: list, meta: Optional[dict] = None, mode: Optional[str] = None, instructions: bool = True) -> str:
         """mode None means the tool's default. instructions False leaves the instruction text out of this reply (spec 5.1).
         Raises ToklexError on a reserved meta key or a record that is not a dict or an object."""
-        meta = dict(meta or {})
+        meta = {k: _norm(v, 1) for k, v in (meta or {}).items()}
         mode = mode if mode in (*_MODES, "auto") else self._default_mode(tool)
         for k in meta:
             c = str(self._kf.get(k, _u8(str(k))))
             if c in (("error",) if self.style() == "plain" else ("i", "e")):
                 raise ToklexError(f"Toklex: meta key {c} is reserved")
-        rows = [_val(r) for r in (rows.values() if isinstance(rows, dict) else rows)]
+        rows = [_norm(r, 0) for r in (rows.values() if isinstance(rows, dict) else rows)]
         for i, r in enumerate(rows):
             if isinstance(r, list):
                 rows[i] = {str(j): x for j, x in enumerate(r)}
@@ -482,10 +554,12 @@ class Toklex:
     def decode(self, text: str) -> dict:
         """Reads a reply back with full key names and values. Raises ToklexError on a reply it refuses (spec 1)."""
         if text.startswith("{"):
-            try:
-                j = _jload(text)
-            except ValueError:
-                j = None
+            j = None
+            if _nest(text) < 512:  # PHP reads JSON nested at most 511 levels
+                try:
+                    j = _jload(text)
+                except ValueError:
+                    pass
             if not (isinstance(j, dict) and isinstance(j.get("schema"), str) and "@" in j["schema"]):
                 raise ToklexError("Toklex: the off reply is not a JSON object with a schema")
             sid, ver = j["schema"].split("@", 1)
@@ -496,12 +570,12 @@ class Toklex:
         k = len(self._s["instructions"]) if self._in_reply() and not text.startswith("~") else 0
         lines = text.split("\n")[k:]
         strip = (lambda c: _LABEL.sub("", c)) if plain else (lambda c: c)
-        h = re.match(r"~([^@ ]+)@(\S+)", lines[0], re.ASCII) if lines else None
+        h = re.match(r"~([^@ ]+)@([^\t\n\x0b\f\r ]+)", lines[0]) if lines else None
         if not h:
             raise ToklexError("Toklex: the reply has no header line")
         ins = k > 0
         meta: dict = {}
-        for m in re.finditer(r' ([^\s:]+):("(?:[^"\\]|\\.)*"|\S*)', lines[0], re.ASCII):
+        for m in re.finditer(r' ([^\t\n\x0b\f\r :]+):("(?:[^"\\]|\\.)*"|[^\t\n\x0b\f\r ]*)', lines[0]):
             c, raw = m.group(1), m.group(2)
             if c == "i" and not plain:
                 ins = raw == "+"
@@ -510,38 +584,65 @@ class Toklex:
                 meta[self._dk.get(c, c)] = self._read(raw, c)
         rows: list = []
         if len(lines) > 1:
+            # the work a reply asks for is counted as it is spent, so a short forged reply is refused before it costs much (spec 11)
+            left = [_MAX_CELLS]
+
+            def spend(cost: int) -> None:
+                left[0] -= cost
+                if left[0] < 0:
+                    raise ToklexError(f"Toklex: a reply of more than {_MAX_CELLS} cells is refused")
             n = re.fullmatch(r"\[([0-9]+)\]( .*)?", lines[1])
             if n:
-                cnt = int(n.group(1))
+                cnt = int(n.group(1)) if len(n.group(1)) <= 9 else _MAX_RECORDS + 1
                 if cnt > _MAX_RECORDS:
                     raise ToklexError(f"Toklex: a reply of more than {_MAX_RECORDS} records is refused")
-                # each column line expands to N cells, so a short forged reply could otherwise claim gigabytes
                 if cnt * (len(lines) - 2) > _MAX_CELLS:
-                    raise ToklexError(f"Toklex: a reply of more than {_MAX_CELLS} cells is refused")
-                cols = []
-                grid: list = [dict() for _ in range(cnt)]
-                for i, line in enumerate(lines[2:]):
+                    spend(_MAX_CELLS + 1)
+                rows = [{} for _ in range(cnt)]
+                for line in lines[2:]:
                     name, _, items = line.partition(":")
-                    cols.append(name)
-                    for r, cell in enumerate(_expand(items, cnt)):
-                        grid[r][i] = cell
-                grid = [[g.get(i, "") for i in range(len(cols))] for g in grid]
+                    keys, code, cost = self._column(strip(name))
+                    spend(cnt * cost)
+                    r = 0
+                    for t, k, step in _items(items, cnt):
+                        if t is None:  # a date sequence from day k
+                            for r in range(r, cnt):
+                                self._put(rows[r], keys, _civil_from_days(k + r * step))
+                            r = cnt
+                            break
+                        spend(k * _extra(t))
+                        v = self._read(t, code)
+                        for i in range(k):  # rows never share a list
+                            self._put(rows[r + i], keys, copy.deepcopy(v) if i and isinstance(v, list) else v)
+                        r += k
+                    for r in range(r, cnt):
+                        self._put(rows[r], keys, None)
             else:
-                cols = [] if lines[1] == "" else lines[1].split("|")
-                grid = [line.split("|") for line in lines[2:]]
-            paths = [[_unname(sg) for sg in strip(col).split(".")] for col in cols]
-            for cells in grid:
-                row: dict = {}
-                for i, segs in enumerate(paths):
-                    self._put(row, segs, self._read(cells[i] if i < len(cells) else "", segs[-1]))
-                rows.append(row)
+                cols = [] if lines[1] == "" else [self._column(strip(c)) for c in lines[1].split("|")]
+                for line in lines[2:]:
+                    cells = line.split("|")
+                    row: dict = {}
+                    for i, (keys, code, cost) in enumerate(cols):
+                        cell = cells[i] if i < len(cells) else ""
+                        spend(cost + _extra(cell))
+                        self._put(row, keys, self._read(cell, code))
+                    rows.append(row)
         return {"schema": h.group(1), "version": h.group(2), "instructions": ins, "meta": meta, "rows": rows}
 
-    def _put(self, row: dict, segs: list, val: Any) -> None:
+    def _column(self, name: str) -> tuple:
+        """A written column name as (the keys of its nested path, the code of its last name, the cost of one of its cells).
+        A cell costs 1 and each name before the last adds 8. Raises ToklexError on a path of more than 64 names."""
+        if name.count(".") >= _MAX_DEPTH:
+            raise ToklexError(f"Toklex: a column path of more than {_MAX_DEPTH} names is refused")
+        segs = [_unname(s) for s in name.split(".")]
+        return [self._dk.get(s, s) for s in segs], segs[-1], 8 * len(segs) - 7
+
+    @staticmethod
+    def _put(row: dict, keys: list, val: Any) -> None:
         """One cell into its nested place. A scalar parent gives way to a nested value, but a null never replaces it,
         and a null parent cell never wipes the object its nested columns built."""
         cont, key = None, None
-        for sg in segs:
+        for k in keys:
             cur = row if cont is None else cont[key]
             if isinstance(cur, list):  # a list is an array to PHP, so a nested column adds its key to it
                 cur = cont[key] = {str(i): x for i, x in enumerate(cur)}
@@ -550,7 +651,6 @@ class Toklex:
                     return
                 cur = {}
                 cont[key] = cur
-            k = self._dk.get(sg, sg)
             cur.setdefault(k, None)
             cont, key = cur, k
         if val is not None or not isinstance(cont[key], (dict, list)):
@@ -615,7 +715,6 @@ class Toklex:
         h += f"~{self._s['id']}@{self._v}" + (" i:+" if ins and self.style() == "coded" else "")
         for k, v in meta.items():
             c = str(self._kf.get(k, _u8(str(k))))
-            v = _val(v)
             t = _quote(self._js(v, True, c)) if isinstance(v, (dict, list)) else self._cell(v, c, True)
             if t != "":
                 h += " " + self._label(_name(c, True), c) + ":" + t
@@ -649,8 +748,7 @@ class Toklex:
         for k, v in row.items():
             c = str(self._kf.get(k, _u8(str(k))))
             p = _name(c) if path == "" else path + "." + _name(c)
-            v = _val(v)
-            if isinstance(v, dict) and v:
+            if isinstance(v, dict) and v and not _listlike(v):
                 for q, x in self._flat(v, p).items():  # a nested column keeps the cell it has, as PHP's += does
                     out.setdefault(q, x)
             else:
@@ -659,7 +757,6 @@ class Toklex:
 
     def _cell(self, v: Any, c: str, hdr: bool = False) -> str:
         """One cell. hdr adds the header's two quote triggers, any whitespace and a double quote."""
-        v = _val(v)
         if v is None:
             return ""
         if isinstance(v, bool):
@@ -677,18 +774,17 @@ class Toklex:
             return str(self._vf[c][v])
         quote = (scaled or v == "" or re.search(r'^["\[{]|[|*\n\r]', v) or v in self._dv.get(c, {})
                  or _NUM.fullmatch(v) or v in ("true", "false", "null") or _SEQ_SHAPE.fullmatch(v)
-                 or (hdr and re.search(r'[\s"]', v, re.ASCII)))
+                 or (hdr and re.search(r'[\t\n\x0b\f\r "]', v)))
         return _quote(v) if quote else v
 
     def _js(self, x: Any, coded: bool, k: Optional[str] = None, obj: bool = False) -> str:
         """JSON text. coded shortens keys and codes strings and numbers by the key they sit under. Lists pass their key down.
-        An empty dict is [] as an empty PHP array is, unless obj asks for an object."""
-        x = _val(x)
+        A dict with the keys 0, 1, ... in order, the empty one too, is a list as that PHP array is, unless obj asks for an object."""
+        if isinstance(x, dict) and not obj and _listlike(x):
+            x = list(x.values())
         if isinstance(x, list):
             return "[" + ",".join(self._js(e, coded, k) for e in x) + "]"
         if isinstance(x, dict):
-            if not x and not obj:
-                return "[]"
             o = []
             for n, e in x.items():
                 c = str(self._kf.get(n, n) if coded else n)
@@ -721,7 +817,7 @@ class Toklex:
             return self._dec(_jload(t), c)
         if t in ("true", "false"):
             return t == "true"
-        if t[0] == "[":
+        if t[0] == "[" and _nest(t) <= _MAX_DEPTH:  # a deeper JSON array cell stays text, as in PHP
             try:
                 j = _jload(t)
                 if isinstance(j, list):
@@ -732,6 +828,8 @@ class Toklex:
 
     def _dec(self, x: Any, k: Optional[str]) -> Any:
         """Full keys, full values and descaled numbers inside decoded JSON."""
+        if isinstance(x, dict) and _listlike(x):  # PHP reads {"0":..,"1":..} as a list
+            x = list(x.values())
         if isinstance(x, list):
             return [self._dec(e, k) for e in x]
         if isinstance(x, dict):
@@ -739,7 +837,10 @@ class Toklex:
         if isinstance(x, str):
             return self._dv.get(k, {}).get(x, x)
         m = self._sc.get(k) if _is_num(x) else None
-        return x / m if m else x
+        if not m:
+            return x
+        # as PHP divides: an int when it divides evenly, otherwise both numbers as floats
+        return x // m if isinstance(x, int) and isinstance(m, int) and x % m == 0 else float(x) / m
 
     @staticmethod
     def _check(s: dict) -> None:
