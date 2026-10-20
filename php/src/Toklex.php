@@ -313,7 +313,8 @@ TXT;
         $l = array_slice(explode("\n", $text), $k);
         $label = fn(string $c) => $plain ? preg_replace('/\(÷[0-9]+\)$/', '', $c) : $c;
         preg_match('/^~([^@ ]+)@([^' . self::WS . ']+)/', $l[0] ?? '', $h) || throw new \InvalidArgumentException('Toklex: the reply has no header line');
-        preg_match_all('/ ([^' . self::WS . ':]+):("(?:[^"\\\\]|\\\\.)*"|[^' . self::WS . ']*)/', $l[0], $m, PREG_SET_ORDER);
+        // possessive, because a backtracking match runs out of JIT stack on a value of about 10 KB and then matches nothing
+        preg_match_all('/ ([^' . self::WS . ':]+):("(?:[^"\\\\]++|\\\\.)*+"|[^' . self::WS . ']*)/', $l[0], $m, PREG_SET_ORDER);
         $ins = $k > 0;
         $meta = [];
         foreach ($m as [, $c, $raw]) {
