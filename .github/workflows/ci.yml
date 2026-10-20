@@ -23,7 +23,7 @@ jobs:
           php-version: ${{ matrix.php }}
           coverage: none
       - run: php -l php/src/Toklex.php
-      - run: php php/tests/run.php
+      - run: php -d memory_limit=128M php/tests/run.php
 
   phpstan:
     runs-on: ubuntu-latest

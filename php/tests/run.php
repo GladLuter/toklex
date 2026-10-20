@@ -401,34 +401,31 @@ check('a short reply that expands past the cell limit is refused before it is bu
     [throwsInvalid(fn() => $tx->decode("$dh\n[100000]\n$wide")), memory_get_peak_usage() - $mem < 8_000_000]);
 
 // review 2026-10-19, item 1: the cost of a reply bounds memory and time inside PHP's default memory_limit of 128M (spec 11)
-$cost = function (callable $f): array { // [rows or 'refused', MB above the start, seconds]
-    gc_collect_cycles();
-    function_exists('memory_reset_peak_usage') && memory_reset_peak_usage();
-    [$m, $t] = [memory_get_usage(), microtime(true)];
-    try {
-        $r = count($f()['rows']);
-    } catch (\InvalidArgumentException) {
-        $r = 'refused';
-    }
-    return [$r, (memory_get_peak_usage() - $m) / 1048576, microtime(true) - $t];
+$cost = function (string $reply) use ($fx): array { // [rows or 'refused', MB above the start, seconds], in a fresh process at 128M
+    $p = proc_open([PHP_BINARY, '-d', 'memory_limit=128M', __DIR__ . '/cost.php', "$fx/test.schema.json"], [['pipe', 'r'], ['pipe', 'w'], STDERR], $pipes);
+    fwrite($pipes[0], $reply);
+    fclose($pipes[0]);
+    $out = (string) stream_get_contents($pipes[1]);
+    proc_close($p);
+    return json_decode($out, true) ?? ["no answer: $out", INF, INF];
 };
 $cols = fn(int $n, int $k, string $cell = 'x') => "$dh\n[$n]\n" . implode("\n", array_map(fn($i) => "c$i:$cell*$n", range(1, $k)));
-[$r, $mb] = $cost(fn() => $tx->decode($cols(100000, 5)));
+[$r, $mb] = $cost($cols(100000, 5));
 check('a reply at the cost limit decodes inside 80 MB', [100000, true], [$r, $mb < 80]);
-check('one more column than the cost limit is refused', 'refused', $cost(fn() => $tx->decode($cols(100000, 6)))[0]);
-[$r, $mb] = $cost(fn() => $tx->decode("$dh\n[100000]\n" . implode('.', array_fill(0, 10, 'a')) . ':x*100000'));
+check('one more column than the cost limit is refused', 'refused', $cost($cols(100000, 6))[0]);
+[$r, $mb] = $cost("$dh\n[100000]\n" . implode('.', array_fill(0, 10, 'a')) . ':x*100000');
 check('a nested column costs its depth, so 46 bytes of a.a.a... no longer take 400 MB', ['refused', true], [$r, $mb < 8]);
-[$r, $mb] = $cost(fn() => $tx->decode("$dh\n" . implode('.', array_fill(0, 1000, 'a')) . "\n" . implode("\n", array_fill(0, 2000, '1'))));
+[$r, $mb] = $cost("$dh\n" . implode('.', array_fill(0, 1000, 'a')) . "\n" . implode("\n", array_fill(0, 2000, '1')));
 check('a safe reply with a column path of 1000 names is refused at once', ['refused', true], [$r, $mb < 8]);
 check('a column path of 64 names decodes and one of 65 is refused', [1, 'refused'],
-    [$cost(fn() => $tx->decode("$dh\n" . implode('.', array_fill(0, 64, 'a')) . "\n1"))[0], $cost(fn() => $tx->decode("$dh\n" . implode('.', array_fill(0, 65, 'a')) . "\n1"))[0]]);
+    [$cost("$dh\n" . implode('.', array_fill(0, 64, 'a')) . "\n1")[0], $cost("$dh\n" . implode('.', array_fill(0, 65, 'a')) . "\n1")[0]]);
 $safe = fn(int $n, int $k) => "$dh\n" . implode('|', array_map(fn($i) => "c$i", range(1, $k))) . "\n" . implode("\n", array_fill(0, $n, implode('|', array_fill(0, $k, '1'))));
-check('safe mode has the same cost limit', [100000, 'refused'], [$cost(fn() => $tx->decode($safe(100000, 5)))[0], $cost(fn() => $tx->decode($safe(100000, 6)))[0]]);
-[$r, $mb, $s] = $cost(fn() => $tx->decode("$dh\n[10000]\na:[" . implode(',', range(1, 3000)) . ']*10000'));
+check('safe mode has the same cost limit', [100000, 'refused'], [$cost($safe(100000, 5))[0], $cost($safe(100000, 6))[0]]);
+[$r, $mb, $s] = $cost("$dh\n[10000]\na:[" . implode(',', range(1, 3000)) . ']*10000');
 check('a run of a long JSON array is refused before it is decoded 10000 times', ['refused', true, true], [$r, $mb < 8, $s < 1]);
 check('each [ or { in a JSON array cell costs 8', [7000, 'refused'],
-    [$cost(fn() => $tx->decode("$dh\n[7000]\na:" . str_repeat('[', 8) . str_repeat(']', 8) . '*7000'))[0], $cost(fn() => $tx->decode("$dh\n[8000]\na:" . str_repeat('[', 8) . str_repeat(']', 8) . '*8000'))[0]]);
-[$r, $mb] = $cost(fn() => $tx->decode("$dh\n[100000]\n" . implode("\n", array_map(fn($i) => "d$i:2026-01-01+1d", range(1, 5)))));
+    [$cost("$dh\n[7000]\na:" . str_repeat('[', 8) . str_repeat(']', 8) . '*7000')[0], $cost("$dh\n[8000]\na:" . str_repeat('[', 8) . str_repeat(']', 8) . '*8000')[0]]);
+[$r, $mb] = $cost("$dh\n[100000]\n" . implode("\n", array_map(fn($i) => "d$i:2026-01-01+1d", range(1, 5))));
 check('five date sequences of 100000 dates decode inside 96 MB', [100000, true], [$r, $mb < 96]);
 check('a JSON array cell nested 64 levels is read, 65 levels stay text', [true, true],
     [is_array($tx->decode("$dh\nlb\n" . str_repeat('[', 64) . str_repeat(']', 64))['rows'][0]['labels']), is_string($tx->decode("$dh\nlb\n" . str_repeat('[', 65) . str_repeat(']', 65))['rows'][0]['labels'])]);
