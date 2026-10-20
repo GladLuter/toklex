@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]  # a license expression and license-files need 77
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,6 +9,7 @@ description = "Compact MCP tool results with a schema the model reads. Python po
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]  # copies of the files at the repository root, which CI compares
 authors = [{ name = "Yevgenii Slieptsov" }]
 keywords = ["mcp", "llm", "tokens", "compression", "model-context-protocol"]
 classifiers = ["Programming Language :: Python :: 3", "Operating System :: OS Independent"]

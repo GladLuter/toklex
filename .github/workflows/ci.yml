@@ -101,3 +101,29 @@ jobs:
       - run: python bench/make_data.py
       - run: php bench/encode.php examples/stations.schema.json bench/out/enc
       - run: python bench/tokens.py
+
+  packages:
+    name: Packages carry the licence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # js/ and python/ hold copies of LICENSE and NOTICE, because a package can only ship files from its own folder
+      - run: for d in js python; do cmp LICENSE $d/LICENSE && cmp NOTICE $d/NOTICE; done
+      - run: pip install build && python -m build --outdir dist-py python
+      - run: |
+          python - <<'PY'
+          import glob, tarfile, zipfile
+          wheel = zipfile.ZipFile(glob.glob("dist-py/*.whl")[0]).namelist()
+          sdist = tarfile.open(glob.glob("dist-py/*.tar.gz")[0]).getnames()
+          for f in ("LICENSE", "NOTICE"):
+              assert any(n.endswith(".dist-info/licenses/" + f) for n in wheel), (f, wheel)
+              assert any(n.endswith("/" + f) for n in sdist), (f, sdist)
+          PY
+      - run: npm pack --dry-run --json | python -c "import json, sys; f = {x['path'] for x in json.load(sys.stdin)[0]['files']}; assert {'LICENSE', 'NOTICE'} <= f, f"
+        working-directory: js

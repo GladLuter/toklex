@@ -1,6 +1,6 @@
 # Toklex for Python
 
-A port of the PHP library in this repository. It passes every fixture in [spec/fixtures](../spec/fixtures) and gives the texts of appendix A byte for byte. The protocol is [spec/toklex.md](../spec/toklex.md). Python 3.9 or newer, no dependencies.
+A port of the PHP library in this repository. It passes every fixture in [spec/fixtures](https://github.com/GladLuter/toklex/tree/main/spec/fixtures) and gives the texts of appendix A byte for byte. The protocol is [spec/toklex.md](https://github.com/GladLuter/toklex/blob/main/spec/toklex.md). Python 3.9 or newer, no dependencies.
 
 ```python
 from toklex import Toklex
