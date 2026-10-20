@@ -214,9 +214,8 @@ check("a naive datetime gets +00:00 as PHP gives every date-time a zone", f"{hd}
 check("an inputSchema {} stays without a type, as in PHP", {"properties": {"toklex_mode": {"type": "string", "enum": ["off", "safe", "dense"], "description": "Reply format: off, safe or dense."}}},
       tx.with_tools([{"name": "a", "inputSchema": {}}], lambda m: None)[0]["inputSchema"])
 check("an outputSchema that is None is removed", False, "outputSchema" in tx.with_tools([{"name": "a", "outputSchema": None}], lambda m: None)[0])
-for what, bad in {"a dict": {"station_id": "a"}, "a number": [1], "None": [None]}.items():
-    check(f"encode refuses {what} as a list of records, in every mode", [True, True],
-          [raises(lambda: tx.encode("get_station", bad if what != "a dict" else ["x"])), raises(lambda: tx.encode("get_station", bad if what != "a dict" else ["x"], {}, "off"))])
+for what, bad in {"a string": ["x"], "a number": [1], "None": [None]}.items():
+    check(f"encode refuses {what} as a record, in every mode", [True, True], [raises(lambda: tx.encode("get_station", bad)), raises(lambda: tx.encode("get_station", bad, {}, "off"))])
 check("decode refuses an off reply that is not JSON or has no schema", [True, True], [raises(lambda: tx.decode("{not json")), raises(lambda: tx.decode('{"a":1}'))])
 check("a plain error without instructions starts with the header and reads back", [f"~tp@{tp.version()} error:boom", False],
       [tp.error("boom", None, False), tp.decode(tp.error("boom", None, False))["instructions"]])

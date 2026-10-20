@@ -63,6 +63,10 @@ assert r[12]["error"]["code"] == -32601, "other messages pass unchanged"
 r, _ = session("plain.schema.json", [call(1, "find_stations"), call(2, "find_stations")], "--instructions", "once")
 assert text(1).startswith("rule: ") and text(2).startswith("~tp@"), (text(1), text(2))
 
+# instructions_at server: the rules go with the handshake and no reply carries them
+r, _ = session("plain-server.schema.json", [{"id": 1, "method": "initialize", "params": {}}, call(2, "find_stations")])
+assert r[1]["result"]["instructions"] == "rule: Use only the fields in this reply." and text(2).startswith("~ts@"), r
+
 # coded: the two Toklex tools are answered by the proxy itself
 r, _ = session("test.schema.json", [{"id": 1, "method": "tools/list"}, call(2, "toklex_schema"), call(3, "toklex_calibrate"), call(4, "find_stations")])
 names = [t["name"] for t in r[1]["result"]["tools"]]
