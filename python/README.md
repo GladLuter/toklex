@@ -30,9 +30,11 @@ Values that JSON has no type for are turned into what JSON would carry: a `datet
 toklex-proxy --schema stations.schema.json -- php server.php
 ```
 
-It relays every message and changes four things. The tool list gets `toklex_mode` on every tool and loses `outputSchema`. A call loses `toklex_mode` before the server sees it. A result whose one text block or `structuredContent` holds records becomes one Toklex text block: a list of objects, an object with one member that is such a list (the other members go to the header), or a single object. Errors, free text and anything else pass unchanged. With a coded schema the proxy answers `toklex_schema` and `toklex_calibrate` itself, and with any schema it serves `toklex://modes`.
+It relays every message and changes four things. The tool list gets `toklex_mode` on every tool and loses `outputSchema`. A call loses `toklex_mode` before the server sees it. A result whose JSON text block or `structuredContent` holds records gets a Toklex text block in place of that JSON. Its other content blocks stay. With a coded schema the proxy answers `toklex_schema` and `toklex_calibrate` itself, and with any schema it serves `toklex://modes`.
 
-`--instructions once` sends the instruction text with the first reply of the session only (spec 5.1). It saves tokens on every later reply, but a client that compacts its context can lose the rules, so leave it off when the rules matter for safety.
+Records are a list of objects, an object with one member that is such a list (the other members go to the header), or an object of two or more members. An object with one member, such as `{"result": "hello"}`, only wraps a value and passes unchanged. Errors, free text, messages the proxy cannot read and JSON-RPC batches pass unchanged too. The main [README](https://github.com/GladLuter/toklex#proxy) has the details.
+
+`--instructions once` sends the instruction text with the first reply of the proxy process only (spec 5.1). It saves tokens on every later reply. A client that keeps the server running across a new chat sends that chat no rules, and a client that compacts its context can lose them. Leave it off when the rules matter for safety.
 
 In an MCP client config, the proxy is the command and the server follows `--`:
 

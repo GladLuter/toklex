@@ -338,7 +338,24 @@ The Python port needs Python 3.9 or newer, the TypeScript port Node 22.18 or new
 toklex-proxy --schema stations.schema.json -- php server.php
 ```
 
-The proxy starts the server and relays every message. It adds `toklex_mode` to the tool list and removes `outputSchema`, removes `toklex_mode` from each call, and turns a result that holds records into one Toklex text block. A result holds records when its one text block, or its `structuredContent`, is a list of objects, an object with one member that is such a list (the other members go to the header), or a single object. Errors, free text and anything else pass unchanged. With a coded schema the proxy answers `toklex_schema` and `toklex_calibrate` itself. `--instructions once` sends the rules with the first reply of the session only, with the risk described above.
+The proxy starts the server and relays every message. It changes four things.
+
+- The tool list gets `toklex_mode` on every tool and loses `outputSchema`. With a coded schema the two Toklex tools go on the first page of the list.
+- A call loses `toklex_mode` before the server sees it.
+- A result that holds records gets a Toklex text block in place of its JSON text block. Its other content blocks stay, and its `structuredContent` goes.
+- With a coded schema the proxy answers `toklex_schema` and `toklex_calibrate` itself.
+
+A result holds records when its JSON text block, or its `structuredContent`, is one of these:
+
+- a list of objects,
+- an object with one member that is such a list, where the other members go to the header,
+- an object of two or more members without such a list, which is one record.
+
+An object with one member, such as `{"result": "hello"}`, only wraps a value and passes unchanged. Errors, free text and every other result pass unchanged too. So does a message the proxy cannot read, such as JSON nested too deep for Python. JSON-RPC batches are not supported. They pass unchanged, so a call in a batch keeps `toklex_mode` and its result stays JSON. MCP dropped batches in its 2025-06-18 revision.
+
+`--instructions once` sends the rules with the first reply of the proxy process only, with the risk described above. The proxy cannot see a conversation. A client that keeps the server running across a new chat sends that chat no rules at all.
+
+When the client closes the input of the proxy, the server gets 5 seconds to exit. Then the proxy sends it SIGTERM, and SIGKILL 5 seconds later. A proxy that gets SIGTERM ends its server too.
 
 ## Writing a schema
 

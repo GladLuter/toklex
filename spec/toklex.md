@@ -457,7 +457,7 @@ The server keeps no state between the two calls. The dataset and the key are con
 
 A v0.3 library gives the same version as v0.2 for a schema file that did not change, and for ordinary data it gives the same replies. These changes can still matter to a server owner.
 
-- Names that hold a backslash, `|`, `:`, `÷`, a tab or a line break, names that start with `[`, and metadata keys that hold a space are escaped as `\uXXXX` (section 6.1). A plain schema may hold `÷` or a backslash in a full name. So a field `cost÷unit` is now written `cost÷unit`, and a v0.2 reader returns that text as the name.
+- Names that hold a backslash, `|`, `:`, `÷`, a tab or a line break, names that start with `[`, and metadata keys that hold a space are escaped as `\uXXXX` (section 6.1). A plain schema may hold `÷` or a backslash in a full name. So a field `cost÷unit` is now written `cost\u00f7unit`, and a v0.2 reader returns that text as the name.
 - A reply with the instruction text left out (section 5.1) starts with the header. A v0.2 reader of a schema with instruction lines skips lines that are not there and refuses the reply for having no header line. Update the readers before a server sends such replies.
 - A reader refuses more replies: one that costs more than 500000 cells, one with a column path of more than 64 names, and a date sequence that starts at an invalid date or runs past 9999-12-31 (sections 7 and 11). A v0.2 reader took them and could run out of memory or throw an error of its language.
 - A value nested more than 64 levels deep, and a value where it repeats inside itself, is null (section 11). A v0.2 encoder expanded them without limit.
