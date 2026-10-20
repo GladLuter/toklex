@@ -750,6 +750,9 @@ export class Toklex {
         }
       } else {
         const cols = l[1] === '' ? [] : l[1].split('|').map((c) => this.column(strip(c)));
+        if (l.length - 2 > MAX_RECORDS) {
+          throw new ToklexError(`Toklex: a reply of more than ${MAX_RECORDS} records is refused`);
+        }
         for (const line of l.slice(2)) {
           const cells = line.split('|');
           const row: Obj = {};

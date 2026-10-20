@@ -421,6 +421,12 @@ check('a column path of 64 names decodes and one of 65 is refused', [1, 'refused
     [$cost("$dh\n" . implode('.', array_fill(0, 64, 'a')) . "\n1")[0], $cost("$dh\n" . implode('.', array_fill(0, 65, 'a')) . "\n1")[0]]);
 $safe = fn(int $n, int $k) => "$dh\n" . implode('|', array_map(fn($i) => "c$i", range(1, $k))) . "\n" . implode("\n", array_fill(0, $n, implode('|', array_fill(0, $k, '1'))));
 check('safe mode has the same cost limit', [100000, 'refused'], [$cost($safe(100000, 5))[0], $cost($safe(100000, 6))[0]]);
+[$r, $mb] = $cost($safe(100000, 1));
+check('safe mode has the same record limit, so a 1 MB reply of one short column fits in 128M', [100000, true, 'refused', 'refused'],
+    [$r, $mb < 80, $cost($safe(100001, 1))[0], $cost("$dh
+
+" . str_repeat("
+", 100001))[0]]);
 [$r, $mb, $s] = $cost("$dh\n[10000]\na:[" . implode(',', range(1, 3000)) . ']*10000');
 check('a run of a long JSON array is refused before it is decoded 10000 times', ['refused', true, true], [$r, $mb < 8, $s < 1]);
 check('each [ or { in a JSON array cell costs 8', [7000, 'refused'],

@@ -360,6 +360,7 @@ TXT;
                 }
             } else {
                 $cols = $l[1] === '' ? [] : array_map(fn($c) => $this->column($label($c)), explode('|', $l[1]));
+                count($l) - 2 > self::MAX_RECORDS && throw new \InvalidArgumentException('Toklex: a reply of more than ' . self::MAX_RECORDS . ' records is refused');
                 foreach (array_slice($l, 2) as $line) {
                     $cells = explode('|', $line);
                     $row = [];
