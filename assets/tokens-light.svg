@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="196" viewBox="0 0 880 196" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+<title>Tool-result tokens per question on a production MCP server: JSON 2890, Toklex plain safe 1304 (-55%), Toklex plain dense 1150 (-60%).</title>
+<text x="0" y="22" font-size="16" font-weight="600" fill="#1f2328">Tokens in tool replies, per question</text>
+<text x="0" y="44" font-size="13" fill="#59636e">Production MCP server, Claude Sonnet, 3 questions x 3 runs, 2026-10-19</text>
+<line x1="210" y1="62" x2="210" y2="180" stroke="#d1d9e0" stroke-width="1"/>
+<text x="198" y="89" font-size="14" text-anchor="end" fill="#1f2328">JSON (the server's own)</text>
+<rect x="210" y="74" width="560" height="22" rx="4" fill="#afb8c1"/>
+<text x="780" y="90" font-size="14" fill="#1f2328"><tspan font-weight="600">2,890</tspan></text>
+<text x="198" y="127" font-size="14" text-anchor="end" fill="#1f2328">Toklex plain safe</text>
+<rect x="210" y="112" width="253" height="22" rx="4" fill="#2f7f95"/>
+<text x="473" y="128" font-size="14" fill="#1f2328"><tspan font-weight="600">1,304</tspan><tspan fill="#59636e">  -55%</tspan></text>
+<text x="198" y="165" font-size="14" text-anchor="end" fill="#1f2328">Toklex plain dense</text>
+<rect x="210" y="150" width="223" height="22" rx="4" fill="#2f7f95"/>
+<text x="443" y="166" font-size="14" fill="#1f2328"><tspan font-weight="600">1,150</tspan><tspan fill="#59636e">  -60%</tspan></text>
+</svg>

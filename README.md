@@ -1,4 +1,28 @@
+<div align="center">
+
+<img src="assets/logo.png" alt="Toklex logo" width="128">
+
 # Toklex
+
+**MCP tool replies at about half the tokens.**
+
+A protocol with libraries for PHP, Python and TypeScript, and a proxy for any stdio MCP server.
+
+[![CI](https://github.com/GladLuter/toklex/actions/workflows/ci.yml/badge.svg)](https://github.com/GladLuter/toklex/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/GladLuter/toklex?style=flat-square&color=2f7f95)](https://github.com/GladLuter/toklex/releases)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-4ea1ff?style=flat-square)](LICENSE)
+![MCP](https://img.shields.io/badge/MCP-tool%20replies-d97757?style=flat-square)
+![PHP 8.1+](https://img.shields.io/badge/PHP-8.1%2B-777bb4?style=flat-square)
+![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776ab?style=flat-square)
+![TypeScript](https://img.shields.io/badge/TypeScript-Node%2022-3178c6?style=flat-square)
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="assets/tokens-dark.svg"><img src="assets/tokens-light.svg" alt="Tokens in tool replies per question on a production MCP server: JSON 2,890, Toklex plain safe 1,304 (55% fewer), Toklex plain dense 1,150 (60% fewer)." width="880"></picture>
+
+<sub>Fewer tokens in a reply is not the same as a cheaper session. [Numbers](#-numbers) shows both.</sub>
+
+</div>
+
+---
 
 Toklex shrinks the replies of MCP tools. Most of a JSON reply is keys, quotes and whitespace, and the model pays for every token of it. In the default style, called plain, a reply is a table. A header line, such as `~ws@6425`, names the schema and its version, and the line after it holds the full column names. A scaled column says so in its name, as in `rain_m(÷10000)`. The owner's instructions stand as lines in front of the header. The model needs nothing else to read it.
 
@@ -8,7 +32,7 @@ Coded is still there. Put `"style": "coded"` in the schema and you get the v0.1 
 
 This repository holds the protocol ([spec/toklex.md](spec/toklex.md)), a PHP library, ports to Python and TypeScript, a proxy that puts Toklex in front of any stdio MCP server, a conformance suite and an offline bench. Status is draft v0.3. Section 15 of the spec lists what changed from v0.2.
 
-## Example
+## 🔍 Example
 
 The schema is [examples/stations.schema.json](examples/stations.schema.json). It has no `style`, so it is plain. The three records below are synthetic. The replies were produced by the PHP library with that schema and are not edited.
 
@@ -73,7 +97,7 @@ st-103|Bay Point|co|nb|h|1534|120|905
 
 `mt` is `mountain`, `m` is `MEDIUM`, and the schema scales `rain_m` by 10000. The model learns this from the schema text, which it gets from `toklex_schema`. The mark `i:+` says that the instructions in the schema apply.
 
-## Modes
+## 🎛️ Modes
 
 | Mode | What the reply is | Use it when |
 |---|---|---|
@@ -100,7 +124,7 @@ The style is a separate choice, made in the schema.
 
 In coded style the tool `toklex_calibrate` checks which mode a model reads well. Without arguments it returns a small dataset in both forms and six questions. With `answers` it grades them and recommends a mode. The server keeps no state between the two calls. A plain server has no such tool. It serves one resource, `toklex://modes`, a short text about the three modes.
 
-## Numbers
+## 📊 Numbers
 
 ### Synthetic bench
 
@@ -229,7 +253,7 @@ Plain on a warm cache cost 5% less than JSON. Across the three plain runs that i
 
 The same run tested coded once more. The description of `toklex_schema` said that the schema was already loaded, with the schema text after it. The model stopped calling `toklex_schema`: 0 of 9 sessions, down from 6 of 9. But Claude Code loads an MCP tool's description only when the model fetches the tool with `ToolSearch`, and the model fetched `toklex_schema` that way in 9 of 9 sessions. The extra turn changed form and stayed. Coded took 5.33 turns per question with the new description, 5.67 without it, and plain took 4.89. A client that puts all tool descriptions in context from the first turn should lose the extra turn. This harness cannot measure such a client.
 
-## What it costs
+## 💰 What it costs
 
 Toklex adds a fixed cost to a session. The numbers are counted with o200k_base for the example schema and a server with seven tools.
 
@@ -250,7 +274,7 @@ The tool list stays in context for the whole session. The schema reply comes onc
 
 In the bench a coded safe reply saves 967 tokens per call on average, and a dense reply saves 1120. A session of average calls pays the cost back on its second call. `get_station` saves 110 tokens in safe mode, so a session made of such calls needs ten of them to break even. A session with one small call costs more than plain JSON.
 
-## Quick start for PHP
+## 🚀 Quick start for PHP
 
 PHP 8.1 or newer. Copy `php/src/Toklex.php` into your project, or install with Composer as `toklex/toklex`.
 
@@ -324,7 +348,7 @@ switch ($name) {
 
 `withTools` warns when a tool description goes over 2048 characters, because some clients cut it there and the contract line sits at the end.
 
-## Python and TypeScript
+## 🐍 Python and TypeScript
 
 [python/](https://github.com/GladLuter/toklex/tree/main/python) and [js/](https://github.com/GladLuter/toklex/tree/main/js) are ports of the PHP library with the same rules, texts and method names (snake case in Python). Each passes the whole conformance suite. `tests/cross/fuzz.py` sends the same random records to all three libraries and checks that the replies are equal byte for byte and read back to the same rows. CI runs it on every pull request.
 
@@ -344,7 +368,7 @@ The Python port needs Python 3.9 or newer, the TypeScript port Node 22.18 or new
 
 Two limits come from JavaScript. An object puts keys that look like array indexes, such as `"0"`, before its other keys. Pass a record as a `Map` when such names must keep their place, and the reply matches PHP byte for byte. `decode` returns plain objects, so there such keys come first. An integer above 2^53 has lost digits in a JavaScript number. Pass it as a `bigint`. `decode` returns a `bigint` for an integer cell outside the safe range.
 
-## Proxy
+## 🔌 Proxy
 
 `toklex-proxy`, from the Python package, puts Toklex in front of any stdio MCP server without a change to its code:
 
@@ -371,7 +395,7 @@ An object with one member, such as `{"result": "hello"}`, only wraps a value and
 
 When the client closes the input of the proxy, the server gets 5 seconds to exit. Then the proxy sends it SIGTERM, and SIGKILL 5 seconds later. A proxy that gets SIGTERM ends its server too.
 
-## Writing a schema
+## ✍️ Writing a schema
 
 A schema is one JSON file. `toklex` and `id` are required, the rest is optional.
 
@@ -405,7 +429,7 @@ A field name that is not in `keys` goes out as it is, apart from the characters 
 
 The version is the first four hex characters of the SHA-256 of the file, with CRLF turned into LF. Any edit changes it, a space included. In coded style a changed version makes the model fetch the schema again. A needless refetch costs a few tokens. An unnoticed change could make the model read codes wrongly. In plain style the version only names the schema in the header.
 
-## Porting to another language
+## 🧩 Porting to another language
 
 [spec/toklex.md](spec/toklex.md) is the protocol. Appendix A holds every text the model sees, byte for byte. [spec/fixtures/](spec/fixtures/) is the conformance suite. It has 55 encode and decode cases (34 coded and 21 plain), 24 schemas that must be rejected at load, a mode table and the version hash.
 
@@ -419,7 +443,7 @@ node js/test/run.ts
 
 Each runner prints `OK <n> checks` and exits with 0, or lists the failures and exits with 1. It also compares the library output with Appendix A. `python tests/cross/fuzz.py` then compares the three libraries on random data. A new port can join it with a small encode script like `tests/cross/encode.php`.
 
-## Licence and citation
+## 📜 Licence and citation
 
 Apache-2.0, see [LICENSE](LICENSE). Keep [NOTICE](NOTICE) when you redistribute the code or a port.
 
