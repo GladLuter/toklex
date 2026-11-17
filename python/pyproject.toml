@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "toklex"
-version = "0.3.0"
+version = "0.3.1"
 description = "Compact MCP tool results with a schema the model reads. Python port of the Toklex protocol."
 readme = "README.md"
 requires-python = ">=3.9"

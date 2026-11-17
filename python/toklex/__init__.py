@@ -16,7 +16,7 @@ import re
 from typing import Any, Callable, Optional
 
 __all__ = ["Toklex", "ToklexError", "SCHEMA_TOOL", "CALIBRATE_TOOL"]
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 SCHEMA_TOOL = "toklex_schema"
 CALIBRATE_TOOL = "toklex_calibrate"

@@ -1,6 +1,6 @@
 {
   "name": "toklex",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Compact MCP tool results with a schema the model reads. TypeScript port of the Toklex protocol.",
   "license": "Apache-2.0",
   "author": "Yevgenii Slieptsov",
